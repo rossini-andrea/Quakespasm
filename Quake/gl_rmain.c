@@ -83,6 +83,7 @@ cvar_t	gl_nocolors = {"gl_nocolors","0",CVAR_NONE};
 //johnfitz -- new cvars
 cvar_t	r_stereo = {"r_stereo","0",CVAR_NONE};
 cvar_t	r_stereodepth = {"r_stereodepth","128",CVAR_NONE};
+cvar_t	r_stereomode = {"r_stereomode","0",CVAR_NONE};
 cvar_t	r_clearcolor = {"r_clearcolor","2",CVAR_ARCHIVE};
 cvar_t	r_drawflat = {"r_drawflat","0",CVAR_NONE};
 cvar_t	r_flatlightstyles = {"r_flatlightstyles", "0", CVAR_NONE};
@@ -114,6 +115,58 @@ float	map_fallbackalpha;
 qboolean r_drawflat_cheatsafe, r_fullbright_cheatsafe, r_lightmap_cheatsafe, r_drawworld_cheatsafe; //johnfitz
 
 cvar_t	r_scale = {"r_scale", "1", CVAR_ARCHIVE};
+
+//==============================================================================
+//
+// GLSL STEREO MODE RENDER
+//
+//==============================================================================
+static GLuint r_stereomode_program;
+
+// uniforms used in stereo mode shader
+static GLuint resolutionLoc;
+static GLuint lefttextureLoc;
+static GLuint righttextureLoc;
+
+/*
+=============
+GLSLStereoMode_CreateShaders
+=============
+*/
+static void GLSLStereoMode_CreateShaders (void)
+{
+	const GLchar *vertSource = \
+		"#version 110\n"
+		"\n"
+		"void main(void) {\n"
+		"	gl_Position = vec4(gl_Vertex.xy, 0.0, 1.0);\n"
+		"}\n";
+
+	const GLchar *fragSource = \
+		"#version 110\n"
+		"\n"
+		"uniform vec2 Resolution;\n"
+		"uniform sampler2D LeftTexture;\n"
+		"uniform sampler2D RightTexture;\n"
+		"\n"
+		"void main(void) {\n"
+		"	if (mod(gl_FragCoord.y - 0.5, 2.0) < 0.5) {\n"
+		"		gl_FragColor = texture2D(LeftTexture, gl_FragCoord.xy / u_resolution.xy);\n"
+    		"	} else {\n"
+		"		gl_FragColor = texture2D(RightTexture, vec2(gl_FragCoord.x / u_resolution.x, (gl_FragCoord.y - 1.0) / u_resolution.y));\n"
+		"	}\n"
+		"}\n";
+
+	if (!gl_glsl_gamma_able)
+		return;
+
+	r_stereomode_program = GL_CreateProgram (vertSource, fragSource, 0, NULL);
+
+	// get uniform locations
+	resolutionLoc = GL_GetUniformLocation (&r_stereomode_program, "Resolution");
+	lefttextureLoc = GL_GetUniformLocation (&r_stereomode_program, "LeftTexture");
+	righttextureLoc = GL_GetUniformLocation (&r_stereomode_program, "RightTexture");
+}
 
 //==============================================================================
 //
@@ -1210,25 +1263,51 @@ void R_RenderView (void)
 
 		AngleVectors (r_refdef.viewangles, vpn, vright, vup);
 
-		//render left eye (red)
-		glColorMask(1, 0, 0, 1);
+		//render left eye
+		if (r_stereomode.value == 0)
+		{
+			// Apply red mask
+			glColorMask(1, 0, 0, 1);
+		}
+		else
+		{
+                	// Bind the left framebuffer
+		}
+
 		VectorMA (r_refdef.vieworg, -0.5f * eyesep, vright, r_refdef.vieworg);
 		frustum_skew = 0.5 * eyesep * NEARCLIP / fdepth;
 		srand((int) (cl.time * 1000)); //sync random stuff between eyes
 
 		R_RenderScene ();
 
-		//render right eye (cyan)
-		glClear (GL_DEPTH_BUFFER_BIT);
-		glColorMask(0, 1, 1, 1);
+		//render right eye
+		if (r_stereomode.value == 0)
+		{
+			// Apply cyan mask
+			glClear (GL_DEPTH_BUFFER_BIT);
+			glColorMask(0, 1, 1, 1);
+		}
+		else
+		{
+                	// Bind the right framebuffer
+		}
+
 		VectorMA (r_refdef.vieworg, 1.0f * eyesep, vright, r_refdef.vieworg);
 		frustum_skew = -frustum_skew;
 		srand((int) (cl.time * 1000)); //sync random stuff between eyes
 
 		R_RenderScene ();
 
-		//restore
-		glColorMask(1, 1, 1, 1);
+		if (r_stereomode.value == 0)
+		{
+			//restore
+			glColorMask(1, 1, 1, 1);
+		}
+		else
+		{
+
+		}
+
 		VectorMA (r_refdef.vieworg, -0.5f * eyesep, vright, r_refdef.vieworg);
 		frustum_skew = 0.0f;
 	}
