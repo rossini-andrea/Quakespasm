@@ -128,6 +128,10 @@ static GLuint resolutionLoc;
 static GLuint lefttextureLoc;
 static GLuint righttextureLoc;
 
+// framebuffers for the two eyes
+static gl_framebuffer_t left_stereo_buffer;
+static gl_framebuffer_t right_stereo_buffer;
+
 /*
 =============
 GLSLStereoMode_CreateShaders
@@ -166,6 +170,61 @@ static void GLSLStereoMode_CreateShaders (void)
 	resolutionLoc = GL_GetUniformLocation (&r_stereomode_program, "Resolution");
 	lefttextureLoc = GL_GetUniformLocation (&r_stereomode_program, "LeftTexture");
 	righttextureLoc = GL_GetUniformLocation (&r_stereomode_program, "RightTexture");
+}
+
+/*
+=============
+R_SetStereoViewport
+Sets the vieport according to size of
+the stereo buffers
+=============
+*/
+void R_SetStereoViewport (void)
+{
+	glViewport();
+}
+
+/*
+=============
+R_ShowStereoImage
+Renders the stereo buffers according to
+the stereo mode.
+=============
+*/
+void R_ShowStereoImage (void)
+{
+	// Activate shader and set uniforms
+	GL_UseProgramFunc (r_stereomode_program);
+	GL_Uniform2fFunc (resolutionLoc, r_refdef.vrect.width, r_refdef.vrect.height / 2);
+	GL_Uniform1iFunc (lefttextureLoc, 0);
+	GL_Uniform1iFunc (rightextureLoc, 1);
+
+	// Bind the two textures to interleave
+	GL_SelectTextureFunc(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, left_stereo_buffer->color_buffer);
+	GL_SelectTextureFunc(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, right_stereo_buffer->color_buffer);
+
+	// draw the textures on a big quad
+	glDisable (GL_ALPHA_TEST);
+	glDisable (GL_DEPTH_TEST);
+	glDisable (GL_CULL_FACE);
+
+	glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
+
+	glBegin (GL_QUADS);
+	glTexCoord2f (0, 0);
+	glVertex2f (-1, -1);
+	glTexCoord2f (1, 0);
+	glVertex2f (1, -1);
+	glTexCoord2f (1, 1);
+	glVertex2f (1, 1);
+	glTexCoord2f (0, 1);
+	glVertex2f (-1, 1);
+	glEnd ();
+
+	// clear cached binding
+	GL_ClearBindings ();
 }
 
 //==============================================================================
@@ -1271,7 +1330,12 @@ void R_RenderView (void)
 		}
 		else
 		{
-                	// Bind the left framebuffer
+			// Halve the screen
+			R_SetStereoViewport();
+                	
+			// Bind the left framebuffer
+			GL_BindFramebuffer(left_stereo_buffer);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		}
 
 		VectorMA (r_refdef.vieworg, -0.5f * eyesep, vright, r_refdef.vieworg);
@@ -1290,6 +1354,8 @@ void R_RenderView (void)
 		else
 		{
                 	// Bind the right framebuffer
+			GL_BindFramebuffer(right_stereo_buffer);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		}
 
 		VectorMA (r_refdef.vieworg, 1.0f * eyesep, vright, r_refdef.vieworg);
@@ -1305,7 +1371,7 @@ void R_RenderView (void)
 		}
 		else
 		{
-
+			R_ShowStereoImage();
 		}
 
 		VectorMA (r_refdef.vieworg, -0.5f * eyesep, vright, r_refdef.vieworg);

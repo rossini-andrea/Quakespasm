@@ -463,4 +463,15 @@ void R_ScaleView_DeleteTexture (void);
 
 float GL_WaterAlphaForSurface (msurface_t *fa);
 
+//FrameBuffers
+typedef struct gl_framebuffer_s
+{
+	GLuint handle;
+	GLuint color_buffer;
+	GLuint render_buffer;
+} gl_framebuffer_t;
+
+void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out);
+void GL_DeleteFrameBuffer(gl_framebuffer_t *fb);
+
 #endif	/* GLQUAKE_H */

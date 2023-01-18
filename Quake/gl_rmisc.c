@@ -657,3 +657,67 @@ void GL_ClearBufferBindings ()
 	GL_BindBufferFunc (GL_ARRAY_BUFFER, 0);
 	GL_BindBufferFunc (GL_ELEMENT_ARRAY_BUFFER, 0);
 }
+
+/*
+====================
+GL_CreateFrameBuffer
+
+Creates a framebuffer with default settings
+and provided size.
+====================
+*/
+void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out)
+{
+	if (out == NULL)
+	{
+		return;
+	}
+
+	GLUint fbo = 0;
+
+        GL_GenFramebuffersFunc(1, &fbo);
+        GL_BindFramebufferFunc(GL_FRAMEBUFFER, fbo);
+
+        GLuint color_buffer = 0;
+
+	glGenTextures(1, &color_buffer);
+	glBindTexture(GL_TEXTURE_2D, color_buffer);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLLINEAR);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_buffer, 0);
+
+        GLuint render_buffer = 0;
+
+	glGenRenderbuffers(1, &render_buffer);
+	glBindRenderbuffer(GL_RENDERBUFFER, render_buffer);
+	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, render_buffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	out->handle = fbo;
+	out->color_buffer = color_buffer;
+	out->render_buffer = render_buffer;
+}
+
+/*
+====================
+GL_DeleteFrameBuffer
+
+Deletes a framebuffer and releases
+its resources
+====================
+*/
+void GL_DeleteFrameBuffer(gl_framebuffer_t *fb)
+{
+	if (fb == NULL)
+	{
+		return;
+	}
+
+	glDeleteFramebuffers(1, fb->handle);
+	glDeleteTextures(1, fb->color_buffer);
+	glDeleteRenderbuffers(1, fb->render_buffer);
+}
