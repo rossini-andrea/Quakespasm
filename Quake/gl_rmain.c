@@ -181,7 +181,7 @@ the stereo buffers
 */
 void R_SetStereoViewport (void)
 {
-	glViewport();
+	glViewport(r_refdef.vrect.x, r_refdef.vrect.y, r_refdef.vrect.width, r_refdef.vrect.height / 2);
 }
 
 /*
@@ -197,20 +197,20 @@ void R_ShowStereoImage (void)
 	GL_UseProgramFunc (r_stereomode_program);
 	GL_Uniform2fFunc (resolutionLoc, r_refdef.vrect.width, r_refdef.vrect.height / 2);
 	GL_Uniform1iFunc (lefttextureLoc, 0);
-	GL_Uniform1iFunc (rightextureLoc, 1);
+	GL_Uniform1iFunc (righttextureLoc, 1);
 
 	// Bind the two textures to interleave
 	GL_SelectTextureFunc(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, left_stereo_buffer->color_buffer);
+	glBindTexture(GL_TEXTURE_2D, left_stereo_buffer.color_buffer);
 	GL_SelectTextureFunc(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, right_stereo_buffer->color_buffer);
+	glBindTexture(GL_TEXTURE_2D, right_stereo_buffer.color_buffer);
 
 	// draw the textures on a big quad
 	glDisable (GL_ALPHA_TEST);
 	glDisable (GL_DEPTH_TEST);
 	glDisable (GL_CULL_FACE);
 
-	glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
+	glViewport (r_refdef.vrect.x, r_refdef.vrect.y, r_refdef.vrect.width, r_refdef.vrect.height);
 
 	glBegin (GL_QUADS);
 	glTexCoord2f (0, 0);
@@ -1332,9 +1332,9 @@ void R_RenderView (void)
 		{
 			// Halve the screen
 			R_SetStereoViewport();
-                	
+	
 			// Bind the left framebuffer
-			GL_BindFramebuffer(left_stereo_buffer);
+			GL_BindFramebuffer(&left_stereo_buffer);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		}
 
@@ -1354,7 +1354,7 @@ void R_RenderView (void)
 		else
 		{
                 	// Bind the right framebuffer
-			GL_BindFramebuffer(right_stereo_buffer);
+			GL_BindFramebuffer(&right_stereo_buffer);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 		}
 

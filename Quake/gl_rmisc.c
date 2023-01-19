@@ -673,7 +673,7 @@ void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out)
 		return;
 	}
 
-	GLUint fbo = 0;
+	GLuint fbo = 0;
 
         GL_GenFramebuffersFunc(1, &fbo);
         GL_BindFramebufferFunc(GL_FRAMEBUFFER, fbo);
@@ -684,22 +684,37 @@ void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out)
 	glBindTexture(GL_TEXTURE_2D, color_buffer);
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GLLINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glBindTexture(GL_TEXTURE_2D, 0);
-	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_buffer, 0);
+	GL_FramebufferTexture2DFunc(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_buffer, 0);
 
         GLuint render_buffer = 0;
 
-	glGenRenderbuffers(1, &render_buffer);
-	glBindRenderbuffer(GL_RENDERBUFFER, render_buffer);
-	glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
-	glBindRenderbuffer(GL_RENDERBUFFER, 0);
-	glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, render_buffer);
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	GL_GenRenderbuffersFunc(1, &render_buffer);
+	GL_BindRenderbufferFunc(GL_RENDERBUFFER, render_buffer);
+	GL_RenderbufferStorageFunc(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+	GL_BindRenderbufferFunc(GL_RENDERBUFFER, 0);
+	GL_FramebufferRenderbufferFunc(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, render_buffer);
+	GL_BindFramebufferFunc(GL_FRAMEBUFFER, 0);
 
 	out->handle = fbo;
 	out->color_buffer = color_buffer;
 	out->render_buffer = render_buffer;
+}
+
+/*
+====================
+GL_BindFramebuffer
+====================
+*/
+void GL_BindFramebuffer(gl_framebuffer_t *fb)
+{
+	if (fb == NULL)
+	{
+		return;
+	}
+
+	GL_BindFramebufferFunc(fb->handle);
 }
 
 /*
@@ -717,7 +732,7 @@ void GL_DeleteFrameBuffer(gl_framebuffer_t *fb)
 		return;
 	}
 
-	glDeleteFramebuffers(1, fb->handle);
+	GL_DeleteFramebuffersFunc(1, fb->handle);
 	glDeleteTextures(1, fb->color_buffer);
-	glDeleteRenderbuffers(1, fb->render_buffer);
+	GL_DeleteRenderbuffersFunc(1, fb->render_buffer);
 }

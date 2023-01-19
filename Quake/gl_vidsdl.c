@@ -141,8 +141,11 @@ QS_PFNGLVERTEXATTRIBPOINTERPROC GL_VertexAttribPointerFunc = NULL; //ericw
 QS_PFNGLENABLEVERTEXATTRIBARRAYPROC GL_EnableVertexAttribArrayFunc = NULL; //ericw
 QS_PFNGLDISABLEVERTEXATTRIBARRAYPROC GL_DisableVertexAttribArrayFunc = NULL; //ericw
 QS_PFNGLGETUNIFORMLOCATIONPROC GL_GetUniformLocationFunc = NULL; //ericw
+QS_PFNGLGENFRAMEBUFFERSPROC GL_GenFramebuffersFunc = NULL;
+QS_PFNGLBINDFRAMEBUFFERPROC GL_BindFramebufferFunc = NULL;
 QS_PFNGLUNIFORM1IPROC GL_Uniform1iFunc = NULL; //ericw
 QS_PFNGLUNIFORM1FPROC GL_Uniform1fFunc = NULL; //ericw
+QS_PFNGLUNIFORM1FPROC GL_Uniform2fFunc = NULL; //pangocciolo
 QS_PFNGLUNIFORM3FPROC GL_Uniform3fFunc = NULL; //ericw
 QS_PFNGLUNIFORM4FPROC GL_Uniform4fFunc = NULL; //ericw
 QS_PFNGLUNIFORM4FVPROC GL_Uniform4fvFunc = NULL; //spike (for iqms)
@@ -1194,6 +1197,7 @@ static void GL_CheckExtensions (void)
 		GL_GetUniformLocationFunc = (QS_PFNGLGETUNIFORMLOCATIONPROC) SDL_GL_GetProcAddress("glGetUniformLocation");
 		GL_Uniform1iFunc = (QS_PFNGLUNIFORM1IPROC) SDL_GL_GetProcAddress("glUniform1i");
 		GL_Uniform1fFunc = (QS_PFNGLUNIFORM1FPROC) SDL_GL_GetProcAddress("glUniform1f");
+		GL_Uniform2fFunc = (QS_PFNGLUNIFORM1FPROC) SDL_GL_GetProcAddress("glUniform2f");
 		GL_Uniform3fFunc = (QS_PFNGLUNIFORM3FPROC) SDL_GL_GetProcAddress("glUniform3f");
 		GL_Uniform4fFunc = (QS_PFNGLUNIFORM4FPROC) SDL_GL_GetProcAddress("glUniform4f");
 		GL_Uniform4fvFunc = (QS_PFNGLUNIFORM4FVPROC) SDL_GL_GetProcAddress("glUniform4fv");
@@ -1260,6 +1264,27 @@ static void GL_CheckExtensions (void)
 	else
 	{
 		Con_Warning ("GLSL alias model rendering not available, using Fitz renderer\n");
+	}
+
+	// Framebuffers
+	if (COM_CheckParm("-nofbo"))
+		Con_Warning ("Framebuffer objects disabled at command line\n");
+	else if (gl_version_major >= 3)
+		Con_Warning ("OpenGL version < 3, skipping framebuffer check\n");
+	else
+	{
+		GL_GenFramebuffersFunc = (QS_PFNGLGENFRAMEBUFFERSPROC) SDL_GL_GetProcAddress("glGenFramebuffers");
+		GL_BindFramebufferFunc = (QS_PFNGLBINDFRAMEBUFFERPROC) SDL_GL_GetProcAddress("glBindFramebuffer");
+
+		if (GL_GenFramebuffersFunc && GL_BindFramebufferFunc)
+		{
+			Con_Printf("FOUND: Framebuffers\n");
+			gl_fbo_able = true;
+		}
+		else
+		{
+			Con_Warning ("Framebuffers not available\n");
+		}
 	}
 }
 

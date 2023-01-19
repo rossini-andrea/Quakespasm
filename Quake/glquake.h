@@ -232,8 +232,11 @@ typedef void (APIENTRYP QS_PFNGLVERTEXATTRIBPOINTERPROC) (GLuint index, GLint si
 typedef void (APIENTRYP QS_PFNGLENABLEVERTEXATTRIBARRAYPROC) (GLuint index);
 typedef void (APIENTRYP QS_PFNGLDISABLEVERTEXATTRIBARRAYPROC) (GLuint index);
 typedef GLint (APIENTRYP QS_PFNGLGETUNIFORMLOCATIONPROC) (GLuint program, const GLchar *name);
+typedef void (APIENTRYP QS_PFNGLGENFRAMEBUFFERSPROC) (GLsizei count, GLuint *ids);
+typedef void (APIENTRYP QS_PFNGLBINDFRAMEBUFFERPROC) (GLenum target, GLuint framebuffer);
 typedef void (APIENTRYP QS_PFNGLUNIFORM1IPROC) (GLint location, GLint v0);
 typedef void (APIENTRYP QS_PFNGLUNIFORM1FPROC) (GLint location, GLfloat v0);
+typedef void (APIENTRYP QS_PFNGLUNIFORM2FPROC) (GLint location, GLfloat v0, GLfloat v1);
 typedef void (APIENTRYP QS_PFNGLUNIFORM3FPROC) (GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
 typedef void (APIENTRYP QS_PFNGLUNIFORM4FPROC) (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
 typedef void (APIENTRYP QS_PFNGLUNIFORM4FVPROC) (GLint location, GLsizei count, const GLfloat *value);
@@ -257,8 +260,11 @@ extern QS_PFNGLVERTEXATTRIBPOINTERPROC GL_VertexAttribPointerFunc;
 extern QS_PFNGLENABLEVERTEXATTRIBARRAYPROC GL_EnableVertexAttribArrayFunc;
 extern QS_PFNGLDISABLEVERTEXATTRIBARRAYPROC GL_DisableVertexAttribArrayFunc;
 extern QS_PFNGLGETUNIFORMLOCATIONPROC GL_GetUniformLocationFunc;
+extern QS_PFNGLGENFRAMEBUFFERSPROC GL_GenFramebuffersFunc;
+extern QS_PFNGLBINDFRAMEBUFFERPROC GL_BindFramebufferFunc;
 extern QS_PFNGLUNIFORM1IPROC GL_Uniform1iFunc;
 extern QS_PFNGLUNIFORM1FPROC GL_Uniform1fFunc;
+extern QS_PFNGLUNIFORM2FPROC GL_Uniform2fFunc;
 extern QS_PFNGLUNIFORM3FPROC GL_Uniform3fFunc;
 extern QS_PFNGLUNIFORM4FPROC GL_Uniform4fFunc;
 extern QS_PFNGLUNIFORM4FVPROC GL_Uniform4fvFunc;
@@ -472,6 +478,7 @@ typedef struct gl_framebuffer_s
 } gl_framebuffer_t;
 
 void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out);
+void GL_BindFramebuffer(gl_framebuffer_t *fb);
 void GL_DeleteFrameBuffer(gl_framebuffer_t *fb);
 
 #endif	/* GLQUAKE_H */
