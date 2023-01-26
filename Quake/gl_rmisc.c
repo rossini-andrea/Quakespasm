@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_misc.c
 
 #include "quakedef.h"
+#include "glquake.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_stereo;
@@ -668,33 +669,35 @@ and provided size.
 */
 void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out)
 {
-	if (out == NULL)
+	if (out == NULL || !gl_fbo_able)
 	{
 		return;
 	}
 
 	GLuint fbo = 0;
 
-        GL_GenFramebuffersFunc(1, &fbo);
-        GL_BindFramebufferFunc(GL_FRAMEBUFFER, fbo);
+	GL_GenFramebuffersFunc(1, &fbo);
+	GL_BindFramebufferFunc(GL_FRAMEBUFFER, fbo);
 
-        GLuint color_buffer = 0;
+	GLuint color_buffer = 0;
 
 	glGenTextures(1, &color_buffer);
 	glBindTexture(GL_TEXTURE_2D, color_buffer);
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w, h, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV,
+		NULL);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glBindTexture(GL_TEXTURE_2D, 0);
 	GL_FramebufferTexture2DFunc(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_buffer, 0);
 
-        GLuint render_buffer = 0;
+	GLuint render_buffer = 0;
 
 	GL_GenRenderbuffersFunc(1, &render_buffer);
 	GL_BindRenderbufferFunc(GL_RENDERBUFFER, render_buffer);
 	GL_RenderbufferStorageFunc(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
 	GL_BindRenderbufferFunc(GL_RENDERBUFFER, 0);
-	GL_FramebufferRenderbufferFunc(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, render_buffer);
+	GL_FramebufferRenderbufferFunc(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
+		GL_RENDERBUFFER, render_buffer);
 	GL_BindFramebufferFunc(GL_FRAMEBUFFER, 0);
 
 	out->handle = fbo;
@@ -714,7 +717,17 @@ void GL_BindFramebuffer(gl_framebuffer_t *fb)
 		return;
 	}
 
-	GL_BindFramebufferFunc(fb->handle);
+	GL_BindFramebufferFunc(GL_FRAMEBUFFER, fb->handle);
+}
+
+/*
+====================
+GL_ResetFramebuffer
+====================
+*/
+void GL_ResetFramebuffer()
+{
+	GL_BindFramebufferFunc(GL_FRAMEBUFFER, 0);
 }
 
 /*
@@ -732,7 +745,7 @@ void GL_DeleteFrameBuffer(gl_framebuffer_t *fb)
 		return;
 	}
 
-	GL_DeleteFramebuffersFunc(1, fb->handle);
-	glDeleteTextures(1, fb->color_buffer);
-	GL_DeleteRenderbuffersFunc(1, fb->render_buffer);
+	GL_DeleteFramebuffersFunc(1, &fb->handle);
+	glDeleteTextures(1, &fb->color_buffer);
+	GL_DeleteRenderbuffersFunc(1, &fb->render_buffer);
 }

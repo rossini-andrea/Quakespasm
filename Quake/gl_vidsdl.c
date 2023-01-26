@@ -107,6 +107,7 @@ float gl_max_anisotropy; //johnfitz
 qboolean gl_texture_NPOT = false; //ericw
 qboolean gl_vbo_able = false; //ericw
 qboolean gl_glsl_able = false; //ericw
+qboolean gl_fbo_able = false; // Pangocciolo
 GLint gl_max_texture_units = 0; //ericw
 qboolean gl_glsl_gamma_able = false; //ericw
 qboolean gl_glsl_alias_able = false; //ericw
@@ -143,6 +144,14 @@ QS_PFNGLDISABLEVERTEXATTRIBARRAYPROC GL_DisableVertexAttribArrayFunc = NULL; //e
 QS_PFNGLGETUNIFORMLOCATIONPROC GL_GetUniformLocationFunc = NULL; //ericw
 QS_PFNGLGENFRAMEBUFFERSPROC GL_GenFramebuffersFunc = NULL;
 QS_PFNGLBINDFRAMEBUFFERPROC GL_BindFramebufferFunc = NULL;
+QS_PFNGLFRAMEBUFFERTEXTURE2DPROC GL_FramebufferTexture2DFunc = NULL;
+QS_PFNGLGENRENDERBUFFERSPROC GL_GenRenderbuffersFunc = NULL;
+QS_PFNGLBINDRENDERBUFFERPROC GL_BindRenderbufferFunc = NULL;
+QS_PFNGLRENDERBUFFERSTORAGEPROC GL_RenderbufferStorageFunc = NULL;
+QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC GL_FramebufferRenderbufferFunc = NULL;
+QS_PFNGLDELETEFRAMEBUFFERSPROC GL_DeleteFramebuffersFunc = NULL;
+QS_PFNGLDELETERENDERBUFFERSPROC GL_DeleteRenderbuffersFunc = NULL;
+QS_PFNGLCHECKFRAMEBUFFERSTATUSPROC GL_CheckFramebufferStatusFunc = NULL;
 QS_PFNGLUNIFORM1IPROC GL_Uniform1iFunc = NULL; //ericw
 QS_PFNGLUNIFORM1FPROC GL_Uniform1fFunc = NULL; //ericw
 QS_PFNGLUNIFORM1FPROC GL_Uniform2fFunc = NULL; //pangocciolo
@@ -1269,14 +1278,26 @@ static void GL_CheckExtensions (void)
 	// Framebuffers
 	if (COM_CheckParm("-nofbo"))
 		Con_Warning ("Framebuffer objects disabled at command line\n");
-	else if (gl_version_major >= 3)
+	else if (gl_version_major < 3)
 		Con_Warning ("OpenGL version < 3, skipping framebuffer check\n");
 	else
 	{
-		GL_GenFramebuffersFunc = (QS_PFNGLGENFRAMEBUFFERSPROC) SDL_GL_GetProcAddress("glGenFramebuffers");
-		GL_BindFramebufferFunc = (QS_PFNGLBINDFRAMEBUFFERPROC) SDL_GL_GetProcAddress("glBindFramebuffer");
+		GL_GenFramebuffersFunc = (QS_PFNGLGENFRAMEBUFFERSPROC)SDL_GL_GetProcAddress("glGenFramebuffers");
+		GL_BindFramebufferFunc = (QS_PFNGLBINDFRAMEBUFFERPROC)SDL_GL_GetProcAddress("glBindFramebuffer");
+		GL_FramebufferTexture2DFunc = (QS_PFNGLFRAMEBUFFERTEXTURE2DPROC)SDL_GL_GetProcAddress("glFramebufferTexture2D");
+		GL_GenRenderbuffersFunc = (QS_PFNGLGENRENDERBUFFERSPROC)SDL_GL_GetProcAddress("glGenRenderbuffers");
+		GL_BindRenderbufferFunc = (QS_PFNGLBINDRENDERBUFFERPROC)SDL_GL_GetProcAddress("glBindRenderbuffer");
+		GL_RenderbufferStorageFunc = (QS_PFNGLRENDERBUFFERSTORAGEPROC)SDL_GL_GetProcAddress("glRenderbufferStorage");
+		GL_FramebufferRenderbufferFunc = (QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC)SDL_GL_GetProcAddress("glFramebufferRenderbuffer");
+		GL_DeleteFramebuffersFunc = (QS_PFNGLDELETEFRAMEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteFramebuffers");
+		GL_DeleteRenderbuffersFunc = (QS_PFNGLDELETERENDERBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteRenderbuffers");
+		GL_CheckFramebufferStatusFunc = (QS_PFNGLCHECKFRAMEBUFFERSTATUSPROC)SDL_GL_GetProcAddress("glCheckFramebufferStatus");
 
-		if (GL_GenFramebuffersFunc && GL_BindFramebufferFunc)
+		if (GL_GenFramebuffersFunc && GL_BindFramebufferFunc &&
+			GL_FramebufferTexture2DFunc && GL_GenRenderbuffersFunc &&
+			GL_BindRenderbufferFunc && GL_RenderbufferStorageFunc &&
+			GL_FramebufferRenderbufferFunc && GL_DeleteFramebuffersFunc &&
+			GL_DeleteRenderbuffersFunc)
 		{
 			Con_Printf("FOUND: Framebuffers\n");
 			gl_fbo_able = true;

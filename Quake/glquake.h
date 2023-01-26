@@ -262,6 +262,14 @@ extern QS_PFNGLDISABLEVERTEXATTRIBARRAYPROC GL_DisableVertexAttribArrayFunc;
 extern QS_PFNGLGETUNIFORMLOCATIONPROC GL_GetUniformLocationFunc;
 extern QS_PFNGLGENFRAMEBUFFERSPROC GL_GenFramebuffersFunc;
 extern QS_PFNGLBINDFRAMEBUFFERPROC GL_BindFramebufferFunc;
+extern QS_PFNGLFRAMEBUFFERTEXTURE2DPROC GL_FramebufferTexture2DFunc;
+extern QS_PFNGLGENRENDERBUFFERSPROC GL_GenRenderbuffersFunc;
+extern QS_PFNGLBINDRENDERBUFFERPROC GL_BindRenderbufferFunc;
+extern QS_PFNGLRENDERBUFFERSTORAGEPROC GL_RenderbufferStorageFunc;
+extern QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC GL_FramebufferRenderbufferFunc;
+extern QS_PFNGLDELETEFRAMEBUFFERSPROC GL_DeleteFramebuffersFunc;
+extern QS_PFNGLDELETERENDERBUFFERSPROC GL_DeleteRenderbuffersFunc;
+extern QS_PFNGLCHECKFRAMEBUFFERSTATUSPROC GL_CheckFramebufferStatusFunc;
 extern QS_PFNGLUNIFORM1IPROC GL_Uniform1iFunc;
 extern QS_PFNGLUNIFORM1FPROC GL_Uniform1fFunc;
 extern QS_PFNGLUNIFORM2FPROC GL_Uniform2fFunc;
@@ -480,5 +488,6 @@ typedef struct gl_framebuffer_s
 void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out);
 void GL_BindFramebuffer(gl_framebuffer_t *fb);
 void GL_DeleteFrameBuffer(gl_framebuffer_t *fb);
+void GL_ResetFramebuffer();
 
 #endif	/* GLQUAKE_H */
