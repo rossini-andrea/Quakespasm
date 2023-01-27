@@ -151,10 +151,9 @@ QS_PFNGLRENDERBUFFERSTORAGEPROC GL_RenderbufferStorageFunc = NULL;
 QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC GL_FramebufferRenderbufferFunc = NULL;
 QS_PFNGLDELETEFRAMEBUFFERSPROC GL_DeleteFramebuffersFunc = NULL;
 QS_PFNGLDELETERENDERBUFFERSPROC GL_DeleteRenderbuffersFunc = NULL;
-QS_PFNGLCHECKFRAMEBUFFERSTATUSPROC GL_CheckFramebufferStatusFunc = NULL;
 QS_PFNGLUNIFORM1IPROC GL_Uniform1iFunc = NULL; //ericw
 QS_PFNGLUNIFORM1FPROC GL_Uniform1fFunc = NULL; //ericw
-QS_PFNGLUNIFORM1FPROC GL_Uniform2fFunc = NULL; //pangocciolo
+QS_PFNGLUNIFORM2FPROC GL_Uniform2fFunc = NULL; //pangocciolo
 QS_PFNGLUNIFORM3FPROC GL_Uniform3fFunc = NULL; //ericw
 QS_PFNGLUNIFORM4FPROC GL_Uniform4fFunc = NULL; //ericw
 QS_PFNGLUNIFORM4FVPROC GL_Uniform4fvFunc = NULL; //spike (for iqms)
@@ -1206,7 +1205,7 @@ static void GL_CheckExtensions (void)
 		GL_GetUniformLocationFunc = (QS_PFNGLGETUNIFORMLOCATIONPROC) SDL_GL_GetProcAddress("glGetUniformLocation");
 		GL_Uniform1iFunc = (QS_PFNGLUNIFORM1IPROC) SDL_GL_GetProcAddress("glUniform1i");
 		GL_Uniform1fFunc = (QS_PFNGLUNIFORM1FPROC) SDL_GL_GetProcAddress("glUniform1f");
-		GL_Uniform2fFunc = (QS_PFNGLUNIFORM1FPROC) SDL_GL_GetProcAddress("glUniform2f");
+		GL_Uniform2fFunc = (QS_PFNGLUNIFORM2FPROC) SDL_GL_GetProcAddress("glUniform2f");
 		GL_Uniform3fFunc = (QS_PFNGLUNIFORM3FPROC) SDL_GL_GetProcAddress("glUniform3f");
 		GL_Uniform4fFunc = (QS_PFNGLUNIFORM4FPROC) SDL_GL_GetProcAddress("glUniform4f");
 		GL_Uniform4fvFunc = (QS_PFNGLUNIFORM4FVPROC) SDL_GL_GetProcAddress("glUniform4fv");
@@ -1291,7 +1290,6 @@ static void GL_CheckExtensions (void)
 		GL_FramebufferRenderbufferFunc = (QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC)SDL_GL_GetProcAddress("glFramebufferRenderbuffer");
 		GL_DeleteFramebuffersFunc = (QS_PFNGLDELETEFRAMEBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteFramebuffers");
 		GL_DeleteRenderbuffersFunc = (QS_PFNGLDELETERENDERBUFFERSPROC)SDL_GL_GetProcAddress("glDeleteRenderbuffers");
-		GL_CheckFramebufferStatusFunc = (QS_PFNGLCHECKFRAMEBUFFERSTATUSPROC)SDL_GL_GetProcAddress("glCheckFramebufferStatus");
 
 		if (GL_GenFramebuffersFunc && GL_BindFramebufferFunc &&
 			GL_FramebufferTexture2DFunc && GL_GenRenderbuffersFunc &&

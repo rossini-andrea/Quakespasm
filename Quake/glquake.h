@@ -210,6 +210,9 @@ extern PFNGLGENBUFFERSARBPROC  GL_GenBuffersFunc;
 extern	qboolean	gl_vbo_able;
 //ericw
 
+// Pangocciolo - FBO
+extern	qboolean	gl_fbo_able;
+
 //ericw -- GLSL
 
 // SDL 1.2 has a bug where it doesn't provide these typedefs on OS X!
@@ -240,7 +243,13 @@ typedef void (APIENTRYP QS_PFNGLUNIFORM2FPROC) (GLint location, GLfloat v0, GLfl
 typedef void (APIENTRYP QS_PFNGLUNIFORM3FPROC) (GLint location, GLfloat v0, GLfloat v1, GLfloat v2);
 typedef void (APIENTRYP QS_PFNGLUNIFORM4FPROC) (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3);
 typedef void (APIENTRYP QS_PFNGLUNIFORM4FVPROC) (GLint location, GLsizei count, const GLfloat *value);
-
+typedef void (APIENTRYP QS_PFNGLFRAMEBUFFERTEXTURE2DPROC) (GLenum target, GLenum attachment, GLenum textarget, GLuint texture, GLint level);
+typedef void (APIENTRYP QS_PFNGLGENRENDERBUFFERSPROC) (GLsizei n, GLuint *renderbuffers);
+typedef void (APIENTRYP QS_PFNGLBINDRENDERBUFFERPROC) (GLenum target,GLuint renderbuffer);
+typedef void (APIENTRYP QS_PFNGLRENDERBUFFERSTORAGEPROC) (GLenum target, GLenum internalformat, GLsizei width, GLsizei height);
+typedef void (APIENTRYP QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC) (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
+typedef void (APIENTRYP QS_PFNGLDELETEFRAMEBUFFERSPROC) (GLsizei n, GLuint *framebuffers);
+typedef void (APIENTRYP QS_PFNGLDELETERENDERBUFFERSPROC) (GLsizei n, GLuint *renderbuffers);
 extern QS_PFNGLCREATESHADERPROC GL_CreateShaderFunc;
 extern QS_PFNGLDELETESHADERPROC GL_DeleteShaderFunc;
 extern QS_PFNGLDELETEPROGRAMPROC GL_DeleteProgramFunc;
@@ -269,7 +278,6 @@ extern QS_PFNGLRENDERBUFFERSTORAGEPROC GL_RenderbufferStorageFunc;
 extern QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC GL_FramebufferRenderbufferFunc;
 extern QS_PFNGLDELETEFRAMEBUFFERSPROC GL_DeleteFramebuffersFunc;
 extern QS_PFNGLDELETERENDERBUFFERSPROC GL_DeleteRenderbuffersFunc;
-extern QS_PFNGLCHECKFRAMEBUFFERSTATUSPROC GL_CheckFramebufferStatusFunc;
 extern QS_PFNGLUNIFORM1IPROC GL_Uniform1iFunc;
 extern QS_PFNGLUNIFORM1FPROC GL_Uniform1fFunc;
 extern QS_PFNGLUNIFORM2FPROC GL_Uniform2fFunc;
