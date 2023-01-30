@@ -491,11 +491,14 @@ typedef struct gl_framebuffer_s
 	GLuint handle;
 	GLuint color_buffer;
 	GLuint render_buffer;
+	GLint width;
+	GLint height;
 } gl_framebuffer_t;
 
-void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out);
+void GL_CreateFramebuffer(GLint w, GLint h, gl_framebuffer_t *out);
+void GL_ResizeFramebuffer(gl_framebuffer_t *fb, GLint w, GLint h);
 void GL_BindFramebuffer(gl_framebuffer_t *fb);
-void GL_DeleteFrameBuffer(gl_framebuffer_t *fb);
+void GL_DeleteFramebuffer(gl_framebuffer_t *fb);
 void GL_ResetFramebuffer();
 
 #endif	/* GLQUAKE_H */

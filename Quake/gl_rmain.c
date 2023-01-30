@@ -129,8 +129,8 @@ static GLuint lefttextureLoc;
 static GLuint righttextureLoc;
 
 // framebuffers for the two eyes
-static gl_framebuffer_t left_stereo_buffer = { 0, 0, 0 };
-static gl_framebuffer_t right_stereo_buffer = { 0, 0, 0 };
+static gl_framebuffer_t left_stereo_buffer = { 0, 0, 0, 0, 0 };
+static gl_framebuffer_t right_stereo_buffer = { 0, 0, 0, 0, 0 };
 
 /*
 =============
@@ -1340,7 +1340,11 @@ void R_RenderView (void)
 		{
 			if (!left_stereo_buffer.handle)
 			{
-				GL_CreateFrameBuffer(glwidth, glheight, &left_stereo_buffer);
+				GL_CreateFramebuffer(glwidth, glheight, &left_stereo_buffer);
+			}
+			else
+			{
+				GL_ResizeFramebuffer(&left_stereo_buffer, glwidth, glheight);
 			}
 
 			// Halve the screen
@@ -1368,7 +1372,11 @@ void R_RenderView (void)
 		{
 			if (!right_stereo_buffer.handle)
 			{
-				GL_CreateFrameBuffer(glwidth, glheight, &right_stereo_buffer);
+				GL_CreateFramebuffer(glwidth, glheight, &right_stereo_buffer);
+			}
+			else
+			{
+				GL_ResizeFramebuffer(&right_stereo_buffer, glwidth, glheight);
 			}
 
 			// Bind the right framebuffer

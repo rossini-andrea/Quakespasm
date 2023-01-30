@@ -661,13 +661,13 @@ void GL_ClearBufferBindings ()
 
 /*
 ====================
-GL_CreateFrameBuffer
+GL_CreateFramebuffer
 
 Creates a framebuffer with default settings
 and provided size.
 ====================
 */
-void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out)
+void GL_CreateFramebuffer(GLint w, GLint h, gl_framebuffer_t *out)
 {
 	if (out == NULL || !gl_fbo_able)
 	{
@@ -703,6 +703,31 @@ void GL_CreateFrameBuffer(GLint w, GLint h, gl_framebuffer_t *out)
 	out->handle = fbo;
 	out->color_buffer = color_buffer;
 	out->render_buffer = render_buffer;
+	out->width = w;
+	out->height = h;
+}
+
+/*
+====================
+GL_ResizeFramebuffer
+====================
+*/
+void GL_ResizeFramebuffer(gl_framebuffer_t *fb, GLint w, GLint h)
+{
+	if (fb == NULL || (fb->width == w && fb->height == h))
+	{
+		return;
+	}
+
+	glBindTexture(GL_TEXTURE_2D, fb->color_buffer);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV,
+		NULL);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	GL_BindRenderbufferFunc(GL_RENDERBUFFER, fb->render_buffer);
+	GL_RenderbufferStorageFunc(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+	GL_BindRenderbufferFunc(GL_RENDERBUFFER, 0);
+	fb->width = w;
+	fb->height = h;
 }
 
 /*
@@ -732,13 +757,13 @@ void GL_ResetFramebuffer()
 
 /*
 ====================
-GL_DeleteFrameBuffer
+GL_DeleteFramebuffer
 
 Deletes a framebuffer and releases
 its resources
 ====================
 */
-void GL_DeleteFrameBuffer(gl_framebuffer_t *fb)
+void GL_DeleteFramebuffer(gl_framebuffer_t *fb)
 {
 	if (fb == NULL)
 	{
