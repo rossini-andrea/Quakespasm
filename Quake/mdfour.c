@@ -53,9 +53,9 @@ struct mdfour {
 };
 
 static void mdfour_begin(struct mdfour *md); // old: MD4Init
-static void mdfour_update(struct mdfour *md, unsigned char *in, size_t n); //old: MD4Update
+static void mdfour_update(struct mdfour *md, const unsigned char *in, size_t n); //old: MD4Update
 static void mdfour_result(struct mdfour *md, unsigned char *out); // old: MD4Final
-static void mdfour(unsigned char *out, unsigned char *in, size_t n);
+static void mdfour(unsigned char *out, const unsigned char *in, size_t n);
 
 #endif	// _MDFOUR_H
 
@@ -133,7 +133,7 @@ static void mdfour64(struct mdfour *m, uint32 *M)
 	m->A = A; m->B = B; m->C = C; m->D = D;
 }
 
-static void copy64(uint32 *M, unsigned char *in)
+static void copy64(uint32 *M, const unsigned char *in)
 {
 	int i;
 
@@ -160,7 +160,7 @@ static void mdfour_begin(struct mdfour *md)
 }
 
 
-static void mdfour_tail(struct mdfour *m, unsigned char *in, size_t n)
+static void mdfour_tail(struct mdfour *m, const unsigned char *in, size_t n)
 {
 	unsigned char buf[128];
 	uint32 M[16];
@@ -190,7 +190,7 @@ static void mdfour_tail(struct mdfour *m, unsigned char *in, size_t n)
 	}
 }
 
-static void mdfour_update(struct mdfour *m, unsigned char *in, size_t n)
+static void mdfour_update(struct mdfour *m, const unsigned char *in, size_t n)
 {
 	uint32 M[16];
 
@@ -218,7 +218,7 @@ static void mdfour_result(struct mdfour *m, unsigned char *out)
 }
 
 
-static void mdfour(unsigned char *out, unsigned char *in, size_t n)
+static void mdfour(unsigned char *out, const unsigned char *in, size_t n)
 {
 	struct mdfour md;
 	mdfour_begin(&md);
@@ -234,12 +234,12 @@ static void mdfour(unsigned char *out, unsigned char *in, size_t n)
 //	Author: Jeff Teunissen	<d2deek@pmail.net>
 //	Date: 01 Jan 2000
 
-unsigned Com_BlockChecksum (void *buffer, size_t length)
+unsigned Com_BlockChecksum (const void *buffer, size_t length)
 {
 	int				digest[4];
 	unsigned 		val;
 
-	mdfour ( (unsigned char *) digest, (unsigned char *) buffer, length );
+	mdfour ( (unsigned char *) digest, (const unsigned char *) buffer, length );
 
 	val = digest[0] ^ digest[1] ^ digest[2] ^ digest[3];
 

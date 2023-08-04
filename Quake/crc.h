@@ -30,8 +30,8 @@ unsigned short CRC_Value(unsigned short crcvalue);
 unsigned short CRC_Block (const byte *start, size_t count); //johnfitz -- texture crc
 
 //additional hash functions...
-unsigned Com_BlockChecksum (void *buffer, size_t length);
-void Com_BlockFullChecksum (void *buffer, size_t len, unsigned char *outbuf);
+unsigned Com_BlockChecksum (const void *buffer, size_t length);
+void Com_BlockFullChecksum (const void *buffer, size_t len, unsigned char *outbuf);
 
 #endif	/* _QUAKE_CRC_H */
 

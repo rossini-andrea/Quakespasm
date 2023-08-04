@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 
 extern cvar_t gl_fullbrights, r_drawflat, gl_overbright, r_oldwater; //johnfitz
+extern cvar_t r_brokenturbbias; // to replicate a QuakeSpasm bug.
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 
 int		gl_lightmap_format;
@@ -634,7 +635,7 @@ void R_DrawBrushModel_ShowTris (entity_t *e)
 		if (((psurf->flags & SURF_PLANEBACK) && (dot < -BACKFACE_EPSILON)) ||
 			(!(psurf->flags & SURF_PLANEBACK) && (dot > BACKFACE_EPSILON)))
 		{
-			if ((psurf->flags & SURF_DRAWTURB) && r_oldwater.value)
+			if ((psurf->flags & SURF_DRAWTURB) && !gl_glsl_water_able)
 				for (p = psurf->polys->next; p; p = p->next)
 					DrawGLTriangleFan (p);
 			else
@@ -813,12 +814,12 @@ void GL_CreateSurfaceLightmap (qmodel_t *model, msurface_t *surf)
 BuildSurfaceDisplayList -- called at level load time
 ================
 */
-void BuildSurfaceDisplayList (msurface_t *fa)
+static void BuildSurfaceDisplayList (msurface_t *fa)
 {
 	int			i, lindex, lnumverts;
 	medge_t		*pedges, *r_pedge;
 	float		*vec;
-	float		s, t;
+	float		s, t, s0, t0;
 	glpoly_t	*poly;
 	int			lmscale = (1<<fa->lmshift);
 
@@ -834,6 +835,17 @@ void BuildSurfaceDisplayList (msurface_t *fa)
 	fa->polys = poly;
 	poly->numverts = lnumverts;
 
+	if ((fa->flags & SURF_DRAWTURB) && r_brokenturbbias.value)
+	{
+		// match Mod_PolyForUnlitSurface
+		s0 = t0 = 0.f;
+	}
+	else
+	{
+		s0 = fa->texinfo->vecs[0][3];
+		t0 = fa->texinfo->vecs[1][3];
+	}
+
 	for (i=0 ; i<lnumverts ; i++)
 	{
 		lindex = currentmodel->surfedges[fa->firstedge + i];
@@ -848,10 +860,10 @@ void BuildSurfaceDisplayList (msurface_t *fa)
 			r_pedge = &pedges[-lindex];
 			vec = r_pcurrentvertbase[r_pedge->v[1]].position;
 		}
-		s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
+		s = DotProduct (vec, fa->texinfo->vecs[0]) + s0;
 		s /= fa->texinfo->texture->width;
 
-		t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
+		t = DotProduct (vec, fa->texinfo->vecs[1]) + t0;
 		t /= fa->texinfo->texture->height;
 
 		VectorCopy (vec, poly->verts[i]);
@@ -943,10 +955,16 @@ void GL_BuildLightmaps (void)
 	last_lightmap_allocated = 0;
 	lightmap_count = 0;
 
-	gl_lightmap_format = GL_RGBA;//FIXME: hardcoded for now!
+	if (gl_texture_e5bgr9)// && cl.worldmodel && (cl.worldmodel->flags&MOD_HDRLIGHTING))
+		gl_lightmap_format = GL_RGB9_E5; //requires gl3, allowing for hdr lighting.
+	else
+		gl_lightmap_format = GL_RGBA;//FIXME: hardcoded for now!
 
 	switch (gl_lightmap_format)
 	{
+	case GL_RGB9_E5:
+		lightmap_bytes = 4;
+		break;
 	case GL_RGBA:
 		lightmap_bytes = 4;
 		break;
@@ -1212,7 +1230,6 @@ void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
 	int			smax, tmax;
 	int			r,g,b;
 	int			i, j, size;
-	byte		*lightmap;
 	unsigned	scale;
 	int			maps;
 	unsigned	*bl;
@@ -1222,7 +1239,6 @@ void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
 	smax = (surf->extents[0]>>surf->lmshift)+1;
 	tmax = (surf->extents[1]>>surf->lmshift)+1;
 	size = smax*tmax;
-	lightmap = surf->samples;
 
 	if (model->lightdata)
 	{
@@ -1230,8 +1246,37 @@ void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
 		memset (&blocklights[0], 0, size * 3 * sizeof (unsigned int)); //johnfitz -- lit support via lordhavoc
 
 	// add all the lightmaps
-		if (lightmap)
+		if (!surf->samples)
+			;	//unlit surfaces are black... FIXME: unless lit water (could be new-qbsp + old-light)...
+		else if (model->flags & MOD_HDRLIGHTING)
 		{
+			uint32_t	*lightmap = surf->samples;
+			for (maps = 0 ; maps < MAXLIGHTMAPS && surf->styles[maps] != INVALID_LIGHTSTYLE ;
+				 maps++)
+			{
+				scale = d_lightstylevalue[surf->styles[maps]];
+				surf->cached_light[maps] = scale;	// 8.8 fraction
+				bl = blocklights;		//it sucks that blocklights is an int array. we can still massively overbright though, just not underbright quite as accurately (still quite a bit more than rgb8 precision there).
+				for (i=0 ; i<size ; i++)
+				{
+					static const float rgb9e5tab[32] = {	//multipliers for the 9-bit mantissa, according to the biased mantissa
+						//aka: pow(2, biasedexponent - bias-bits) where bias is 15 and bits is 9
+						1.0/(1<<24),	1.0/(1<<23),	1.0/(1<<22),	1.0/(1<<21),	1.0/(1<<20),	1.0/(1<<19),	1.0/(1<<18),	1.0/(1<<17),
+						1.0/(1<<16),	1.0/(1<<15),	1.0/(1<<14),	1.0/(1<<13),	1.0/(1<<12),	1.0/(1<<11),	1.0/(1<<10),	1.0/(1<<9),
+						1.0/(1<<8),		1.0/(1<<7),		1.0/(1<<6),		1.0/(1<<5),		1.0/(1<<4),		1.0/(1<<3),		1.0/(1<<2),		1.0/(1<<1),
+						1.0,			1.0*(1<<1),		1.0*(1<<2),		1.0*(1<<3),		1.0*(1<<4),		1.0*(1<<5),		1.0*(1<<6),		1.0*(1<<7),
+					};
+					uint32_t e5bgr9 = *lightmap++;
+					float e = rgb9e5tab[e5bgr9>>27] * (1<<7) * scale;	//we're converting to a scale that holds overbrights, so 1->128, its 2->255ish
+					*bl++ += e*((e5bgr9>> 0)&0x1ff);	//red
+					*bl++ += e*((e5bgr9>> 9)&0x1ff);	//green
+					*bl++ += e*((e5bgr9>>18)&0x1ff);	//blue
+				}
+			}
+		}
+		else
+		{
+			byte	*lightmap = surf->samples;
 			for (maps = 0 ; maps < MAXLIGHTMAPS && surf->styles[maps] != INVALID_LIGHTSTYLE ;
 				 maps++)
 			{
@@ -1263,6 +1308,41 @@ void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
 // store:
 	switch (gl_lightmap_format)
 	{
+	case GL_RGB9_E5:
+		{
+			int e;
+			float m;
+			float scale, identity = 1u<<((gl_overbright.value?8:7)+8);	//overbright is redundant with this, but its easier to leave it than conditionally block it.
+			stride -= smax * 4;
+			bl = blocklights;
+			for (i=0 ; i<tmax ; i++, dest += stride)
+			{
+				for (j=0 ; j<smax ; j++)
+				{
+					e = 0;
+					m = q_max(q_max(bl[0], bl[1]), bl[2])/identity;
+					if (m >= 0.5)
+					{	//positive exponent
+						while (m >= (1<<(e)) && e < 30-15)	//don't do nans.
+							e++;
+					}
+					else
+					{	//negative exponent...
+						while (m < 1/(1<<-e) && e > -15)	//don't do denormals.
+							e--;
+					}
+					scale = pow(2, e-9);
+					scale *= identity;
+					*(unsigned int *)dest = ((e+15)<<27) |
+											CLAMP(0, (int)(bl[0]/scale + 0.5), 0x1ff)<<0 |
+											CLAMP(0, (int)(bl[1]/scale + 0.5), 0x1ff)<<9 |
+											CLAMP(0, (int)(bl[2]/scale + 0.5), 0x1ff)<<18;
+					bl += 3;
+					dest += 4;
+				}
+			}
+		}
+		break;
 	case GL_RGBA:
 		stride -= smax * 4;
 		bl = blocklights;
@@ -1336,8 +1416,12 @@ static void R_UploadLightmap(int lmap)
 
 	lm->modified = false;
 
-	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, gl_lightmap_format,
-			GL_UNSIGNED_BYTE, lm->data+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+	if (gl_lightmap_format == GL_RGB9_E5)
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, GL_RGB,
+				GL_UNSIGNED_INT_5_9_9_9_REV, lm->data+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+	else
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, gl_lightmap_format,
+				GL_UNSIGNED_BYTE, lm->data+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
 	lm->rectchange.l = LMBLOCK_WIDTH;
 	lm->rectchange.t = LMBLOCK_HEIGHT;
 	lm->rectchange.h = 0;
@@ -1427,8 +1511,12 @@ void R_RebuildAllLightmaps (void)
 		else
 		{
 			GL_Bind (lightmaps[i].texture);
-			glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, gl_lightmap_format,
-					GL_UNSIGNED_BYTE, lightmaps[i].data);
+			if (gl_lightmap_format == GL_RGB9_E5)
+				glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, GL_RGB,
+						GL_UNSIGNED_INT_5_9_9_9_REV, lightmaps[i].data);
+			else
+				glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, gl_lightmap_format,
+						GL_UNSIGNED_BYTE, lightmaps[i].data);
 		}
 
 		lightmaps[i].modified = false;

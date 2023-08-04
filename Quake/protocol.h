@@ -73,9 +73,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define PEXT2_PREDINFO				0x00000020	//provides input acks and reworks stats such that clc_clientdata becomes redundant.
 #define PEXT2_NEWSIZEENCODING		0x00000040	//richer size encoding, for more precise bboxes.
 #define PEXT2_INFOBLOBS				0x00000080	//unbounded userinfo
-#define PEXT2_ACCEPTED_CLIENT		(PEXT2_SUPPORTED_CLIENT|PEXT2_NEWSIZEENCODING|PEXT2_INFOBLOBS)	//pext2 flags that we can parse, but don't want to advertise (for demos)
-#define PEXT2_SUPPORTED_CLIENT		(PEXT2_PRYDONCURSOR|PEXT2_VOICECHAT|PEXT2_SETANGLEDELTA|PEXT2_REPLACEMENTDELTAS|PEXT2_MAXPLAYERS|PEXT2_PREDINFO)	//pext2 flags that we understand+support
-#define PEXT2_SUPPORTED_SERVER		(PEXT2_PRYDONCURSOR|PEXT2_VOICECHAT|                    PEXT2_REPLACEMENTDELTAS                 |PEXT2_PREDINFO)
+//#define PEXT2_STUNAWARE				0x00000100	//changes the netchan to biased-bigendian (so lead two bits are 1 and not stun's 0, so we don't get confused). not applicable to nq, doesn't change the actual svcs/clcs at all.
+//#define PEXT2_VRINPUTS				0x00000200	//clc_move changes, more buttons etc. vr stuff!
+//#define PEXT2_LERPTIME				0x00000400	//fitz-bloat parity. redefines UF_16BIT as UF_LERPEND in favour of length coding.
+#define PEXT2_ACCEPTED_CLIENT		(PEXT2_SUPPORTED_CLIENT|PEXT2_INFOBLOBS)	//pext2 flags that we can parse, but don't want to advertise (for demos)
+#define PEXT2_SUPPORTED_CLIENT		(PEXT2_PRYDONCURSOR|PEXT2_VOICECHAT|PEXT2_SETANGLEDELTA|PEXT2_REPLACEMENTDELTAS|PEXT2_MAXPLAYERS|PEXT2_PREDINFO|PEXT2_NEWSIZEENCODING)	//pext2 flags that we understand+support
+#define PEXT2_SUPPORTED_SERVER		(PEXT2_PRYDONCURSOR|PEXT2_VOICECHAT|                    PEXT2_REPLACEMENTDELTAS                 |PEXT2_PREDINFO|PEXT2_NEWSIZEENCODING)
 
 // if the high bit of the servercmd is set, the low bits are fast update flags:
 #define	U_MOREBITS		(1<<0)
@@ -101,7 +104,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define U_FRAME2		(1<<17) // 1 byte, this is .frame & 0xFF00 (second byte)
 #define U_MODEL2		(1<<18) // 1 byte, this is .modelindex & 0xFF00 (second byte)
 #define U_LERPFINISH	(1<<19) // 1 byte, 0.0-1.0 maps to 0-255, not sent if exactly 0.1, this is ent->v.nextthink - sv.time, used for lerping
-#define U_SCALE			(1<<20) // 1 byte, for PROTOCOL_RMQ PRFL_EDICTSCALE, currently read but ignored
+#define U_SCALE			(1<<20) // 1 byte, for PROTOCOL_RMQ PRFL_EDICTSCALE
 #define U_UNUSED21		(1<<21)
 #define U_UNUSED22		(1<<22)
 #define U_EXTEND2		(1<<23) // another byte to follow, future expansion
@@ -253,10 +256,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define ENTALPHA_TOSAVE(a)	(((a)==ENTALPHA_DEFAULT)?0.0f:(((a)==ENTALPHA_ZERO)?-1.0f:((float)(a)-1)/(254))) //server convert to float for savegame
 //johnfitz
 
-#define ENTSCALE_DEFAULT	16
-#define ENTSCALE_ENCODE(f)	((f)?CLAMP(1,(int)(ENTSCALE_DEFAULT*(f)),255):ENTSCALE_DEFAULT)
-#define ENTSCALE_DECODE(es)	((es)/(float)ENTSCALE_DEFAULT)
-#define ENTSCALE_QS_IS_BROKEN	//FIXME: remove this once QS fixes its support for B_SCALE, allowing for scaled makestatic and baselines. Until then we are no worse than DP, just with more bloated ent deltas (replacementdeltas avoids spawnstatic feature loss).
+#define ENTSCALE_DEFAULT	16 // Equivalent to float 1.0f due to byte packing.
+#define ENTSCALE_ENCODE(a)	((a) ? ((a) * ENTSCALE_DEFAULT) : ENTSCALE_DEFAULT) // Convert to byte
+#define ENTSCALE_DECODE(a)	((float)(a) / ENTSCALE_DEFAULT) // Convert to float for rendering
 
 // defaults for clientinfo messages
 #define	DEFAULT_VIEWHEIGHT	22
@@ -483,12 +485,14 @@ typedef struct entity_state_s
 	unsigned short	tagentity;
 	unsigned short	pad;
 	unsigned char	colormod[3];	//spike -- entity tints, *32
+	unsigned char	glowmod[3];	//spike -- entity tints, *32
 	unsigned char	alpha;		//johnfitz -- added
 	unsigned int	solidsize;	//for csqc prediction logic.
 					#define ES_SOLID_NOT 0
 					#define ES_SOLID_BSP 31
 					#define ES_SOLID_HULL1 0x80201810
 					#define ES_SOLID_HULL2 0x80401820
+#define ES_SOLID_HAS_EXTRA_BITS(solid) ((solid&0x0707) || (((solid>>16)-32768+32) & 7))
 } entity_state_t;
 #define EFLAGS_STEP				1
 //#define EFLAGS_GLOWTRAIL		2
@@ -527,4 +531,3 @@ typedef struct
 } usercmd_t;
 
 #endif	/* _QUAKE_PROTOCOL_H */
-

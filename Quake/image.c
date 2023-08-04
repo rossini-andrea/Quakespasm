@@ -106,13 +106,17 @@ byte *Image_LoadPNG(FILE *f, int *width, int *height, qboolean *malloced)
 
 	in = malloc(com_filesize);
 	if (!in)
+	{
+		fclose(f);
 		return NULL;
+	}
 	if (com_filesize == fread(in, 1, com_filesize, f))
 	{
 		*malloced = true;
 		lodepng_decode32(&out, &w, &h, in, insize);
 	}
 	free(in);
+	fclose(f);
 	return out;
 #endif
 }
@@ -175,11 +179,11 @@ static byte *Image_LoadDDS(FILE *f, int *width, int *height, enum srcformat *fmt
 	fread(&fmtheader, 1, sizeof(fmtheader), f);
 
 	if (fmtheader.magic != (('D'<<0)|('D'<<8)|('S'<<16)|(' '<<24)))
-		return NULL;
+		goto fail;
 
 	fmtheader.dwSize += sizeof(fmtheader.magic);
 	if (fmtheader.dwSize != sizeof(fmtheader))
-		return NULL;	//corrupt/different version
+		goto fail;	//corrupt/different version
 	memset(&fmt10header, 0, sizeof(fmt10header));
 
 	fmt10header.arraysize = (fmtheader.ddsCaps[1] & 0x200)?6:1; //cubemaps need 6 faces...
@@ -228,7 +232,7 @@ static byte *Image_LoadDDS(FILE *f, int *width, int *height, enum srcformat *fmt
 			Con_Printf(" blue: %08x\n", fmtheader.ddpfPixelFormat.bluemask);
 			Con_Printf("alpha: %08x\n", fmtheader.ddpfPixelFormat.alphamask);
 			Con_Printf(" used: %08x\n", fmtheader.ddpfPixelFormat.redmask^fmtheader.ddpfPixelFormat.greenmask^fmtheader.ddpfPixelFormat.bluemask^fmtheader.ddpfPixelFormat.alphamask);
-			return NULL;
+			goto fail;
 		}
 #undef IsPacked
 	}
@@ -426,7 +430,7 @@ static byte *Image_LoadDDS(FILE *f, int *width, int *height, enum srcformat *fmt
 
 		default:
 			Con_Printf("Unsupported dds10 dxgi in %s - %u\n", fname, fmt10header.dxgiformat);
-			return NULL;
+			goto fail;
 		}
 	}
 	if (encoding == SRC_EXTERNAL)	//used as an error code
@@ -436,40 +440,40 @@ static byte *Image_LoadDDS(FILE *f, int *width, int *height, enum srcformat *fmt
 			((char*)&fmtheader.ddpfPixelFormat.dwFourCC)[1],
 			((char*)&fmtheader.ddpfPixelFormat.dwFourCC)[2],
 			((char*)&fmtheader.ddpfPixelFormat.dwFourCC)[3]);
-		return NULL;
+		goto fail;
 	}
 
 	if ((fmtheader.ddsCaps[1] & 0x200) && (fmtheader.ddsCaps[1] & 0xfc00) != 0xfc00)
-		return NULL;	//cubemap without all 6 faces defined.
+		goto fail;	//cubemap without all 6 faces defined.
 
 	if (fmtheader.ddsCaps[1] & 0x200)
 	{
 		if (fmt10header.arraysize % 6)	//weird number of faces.
-			return NULL;
+			goto fail;
 
 		if (fmt10header.arraysize == 6)
 		{
 			//layers = 6;
-			return NULL;	//don't try to load cubemaps.
+			goto fail;	//don't try to load cubemaps.
 		}
 		else
 		{
 			//layers = fmt10header.arraysize;
-			return NULL;	//don't try to load cubemap arrays.
+			goto fail;	//don't try to load cubemap arrays.
 		}
 	}
 	else if (fmtheader.ddsCaps[1] & 0x200000)
 	{
 		if (fmt10header.arraysize != 1)	//no 2d arrays
-			return NULL;
-		return NULL;	//don't try to load 3d textures.
+			goto fail;
+		goto fail;	//don't try to load 3d textures.
 	}
 	else
 	{
 		if (fmt10header.arraysize == 1)
 			;	//yay, we can load 2d images.
 		else
-			return NULL;	//don't try to load 2d arrays.
+			goto fail;	//don't try to load 2d arrays.
 		//layers = fmt10header.arraysize;
 	}
 
@@ -485,22 +489,28 @@ static byte *Image_LoadDDS(FILE *f, int *width, int *height, enum srcformat *fmt
 	if (mipnum != nummips)
 	{
 		Con_Printf("%s: dds with incomplete mip chain\n", fname);
-		return NULL;
+		goto fail;
 	}
 
 	datasize = TexMgr_ImageSize(fmtheader.dwWidth, fmtheader.dwHeight, encoding);
 	if (!datasize)
-		return NULL;	//werid/unsupported
+		goto fail;	//werid/unsupported
 
 	//just read the mipchain into a new bit of memory and return that.
 	//note that layers and mips are awkward, but we don't support layers here so its just a densely packed pyramid.
 	ret = (byte *) Hunk_Alloc (datasize);
 	fread(ret, 1, datasize, f);
 
+	fclose(f);
+
 	*width = fmtheader.dwWidth;
 	*height = fmtheader.dwHeight;
 	*fmt = encoding;
 	return ret;
+
+fail:
+	fclose(f);
+	return NULL;
 }
 /*spike -- end of dds loader*/
 

@@ -540,6 +540,19 @@ float GL_WaterAlphaForEntitySurface (entity_t *ent, msurface_t *s)
 }
 
 
+static GLuint r_world_program;
+extern GLuint gl_bmodel_vbo;
+
+// uniforms used in frag shader
+static GLuint texLoc;
+static GLuint LMTexLoc;
+static GLuint fullbrightTexLoc;
+static GLuint useFullbrightTexLoc;
+static GLuint useOverbrightLoc;
+static GLuint useAlphaTestLoc;
+static GLuint alphaLoc;
+
+
 static struct
 {
 	GLuint program;
@@ -703,7 +716,6 @@ void R_DrawTextureChains_Water (qmodel_t *model, entity_t *ent, texchain_t chain
 
 	if (gl_glsl_water_able)
 	{
-		extern GLuint gl_bmodel_vbo;
 		int lastlightmap = -2;
 		int mode = -1;
 		for (i=0 ; i<model->numtextures ; i++)
@@ -742,11 +754,11 @@ void R_DrawTextureChains_Water (qmodel_t *model, entity_t *ent, texchain_t chain
 
 					mode = s->lightmaptexturenum>=0 && !r_fullbright_cheatsafe;
 					if (mode)
-					{
+					{	//lit
 						GL_EnableVertexAttribArrayFunc (LMCoordsAttrIndex);
 						GL_Bind (lightmaps[s->lightmaptexturenum].texture);
 					}
-					else
+					else	//unlit
 						GL_DisableVertexAttribArrayFunc (LMCoordsAttrIndex);
 
 					GL_UseProgramFunc (r_water[mode].program);
@@ -778,6 +790,7 @@ void R_DrawTextureChains_Water (qmodel_t *model, entity_t *ent, texchain_t chain
 	}
 	else
 	{
+		// legacy water for people with such old gpus that they can't even use glsl.
 		for (i=0 ; i<model->numtextures ; i++)
 		{
 			t = model->textures[i];
@@ -864,23 +877,6 @@ void R_DrawLightmapChains (void)
 		}
 	}
 }
-
-static GLuint r_world_program;
-
-// uniforms used in vert shader
-
-// uniforms used in frag shader
-static GLuint texLoc;
-static GLuint LMTexLoc;
-static GLuint fullbrightTexLoc;
-static GLuint useFullbrightTexLoc;
-static GLuint useOverbrightLoc;
-static GLuint useAlphaTestLoc;
-static GLuint alphaLoc;
-
-#define vertAttrIndex 0
-#define texCoordsAttrIndex 1
-#define LMCoordsAttrIndex 2
 
 /*
 =============
@@ -972,8 +968,6 @@ void GLWorld_CreateShaders (void)
 	GLWater_CreateShaders();
 }
 
-extern GLuint gl_bmodel_vbo;
-
 /*
 ================
 R_DrawTextureChains_GLSL -- ericw
@@ -1052,7 +1046,6 @@ void R_DrawTextureChains_GLSL (qmodel_t *model, entity_t *ent, texchain_t chain)
 			{
 				GL_SelectTexture (GL_TEXTURE0);
 				GL_Bind ((R_TextureAnimation(t, ent != NULL ? ent->frame : 0))->gltexture);
-					
 				if (t->texturechains[chain]->flags & SURF_DRAWFENCE)
 					GL_Uniform1iFunc (useAlphaTestLoc, 1); // Flip alpha test back on
 										

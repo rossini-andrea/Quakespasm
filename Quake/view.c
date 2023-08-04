@@ -577,9 +577,10 @@ void V_PolyBlend (void)
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity ();
 
-	glColor4fv (v_blend);
-
 	glBegin (GL_QUADS);
+
+	glColor4fv (v_blend); // inside glBegin / glEnd to workaround an AMD driver bug
+
 	glVertex2f (0,0);
 	glVertex2f (1, 0);
 	glVertex2f (1, 1);
@@ -605,14 +606,6 @@ void V_PolyBlend (void)
 ==============================================================================
 */
 
-float angledelta (float a)
-{
-	a = anglemod(a);
-	if (a > 180)
-		a -= 360;
-	return a;
-}
-
 /*
 ==================
 CalcGunAngle
@@ -620,55 +613,9 @@ CalcGunAngle
 */
 void CalcGunAngle (void)
 {
-	float	yaw, pitch, move;
-	static float oldyaw = 0;
-	static float oldpitch = 0;
-
-	yaw = r_refdef.viewangles[YAW];
-	pitch = -r_refdef.viewangles[PITCH];
-
-	yaw = angledelta(yaw - r_refdef.viewangles[YAW]) * 0.4;
-	if (yaw > 10)
-		yaw = 10;
-	if (yaw < -10)
-		yaw = -10;
-	pitch = angledelta(-pitch - r_refdef.viewangles[PITCH]) * 0.4;
-	if (pitch > 10)
-		pitch = 10;
-	if (pitch < -10)
-		pitch = -10;
-	move = host_frametime*20;
-	if (yaw > oldyaw)
-	{
-		if (oldyaw + move < yaw)
-			yaw = oldyaw + move;
-	}
-	else
-	{
-		if (oldyaw - move > yaw)
-			yaw = oldyaw - move;
-	}
-
-	if (pitch > oldpitch)
-	{
-		if (oldpitch + move < pitch)
-			pitch = oldpitch + move;
-	}
-	else
-	{
-		if (oldpitch - move > pitch)
-			pitch = oldpitch - move;
-	}
-
-	oldyaw = yaw;
-	oldpitch = pitch;
-
-	cl.viewent.angles[YAW] = r_refdef.viewangles[YAW] + yaw;
-	cl.viewent.angles[PITCH] = - (r_refdef.viewangles[PITCH] + pitch);
-
-	cl.viewent.angles[ROLL] -= v_idlescale.value * sin(cl.time*v_iroll_cycle.value) * v_iroll_level.value;
-	cl.viewent.angles[PITCH] -= v_idlescale.value * sin(cl.time*v_ipitch_cycle.value) * v_ipitch_level.value;
-	cl.viewent.angles[YAW] -= v_idlescale.value * sin(cl.time*v_iyaw_cycle.value) * v_iyaw_level.value;
+	cl.viewent.angles[ROLL] = -v_idlescale.value * sin(cl.time*v_iroll_cycle.value) * v_iroll_level.value - r_refdef.viewangles[ROLL];
+	cl.viewent.angles[PITCH] = -v_idlescale.value * sin(cl.time*v_ipitch_cycle.value) * v_ipitch_level.value;
+	cl.viewent.angles[YAW] = -v_idlescale.value * sin(cl.time*v_iyaw_cycle.value) * v_iyaw_level.value;
 }
 
 /*
@@ -828,17 +775,13 @@ void V_CalcRefdef (void)
 
 	V_BoundOffsets ();
 
-// set up gun position
-	VectorCopy (cl.viewangles, view->angles);
-
+// set up gun stuff
 	CalcGunAngle ();
 
-	VectorCopy (ent->origin, view->origin);
-	view->origin[2] += cl.stats[STAT_VIEWHEIGHT];
-
-	for (i=0 ; i<3 ; i++)
-		view->origin[i] += forward[i]*bob*0.4;
-	view->origin[2] += bob;
+	view->eflags = EFLAGS_VIEWMODEL;
+	VectorScale(forward, 1.0/32, view->origin);	//bias it very slightly sideways (so it shifts slightly when turning to mimic the 1/32 bias that used to affect it before we changed how viewmodels work)
+	view->origin[0] = bob*0.4;	//and bob it forwards
+	view->alpha = ENTALPHA_ENCODE(r_drawviewmodel.value);
 
 	//johnfitz -- removed all gun position fudging code (was used to keep gun from getting covered by sbar)
 	//MarkV -- restored this with r_viewmodel_quake cvar
@@ -856,7 +799,7 @@ void V_CalcRefdef (void)
 
 	view->model = cl.model_precache[cl.stats[STAT_WEAPON]];
 	view->frame = cl.stats[STAT_WEAPONFRAME];
-	view->netstate.colormap = 0;
+	view->netstate = nullentitystate;
 
 //johnfitz -- v_gunkick
 	if (v_gunkick.value == 1) //original quake kick
@@ -899,7 +842,6 @@ void V_CalcRefdef (void)
 		if (ent->origin[2] - oldz > 12)
 			oldz = ent->origin[2] - 12;
 		r_refdef.vieworg[2] += oldz - ent->origin[2];
-		view->origin[2] += oldz - ent->origin[2];
 	}
 	else
 		oldz = ent->origin[2];
@@ -999,7 +941,7 @@ void V_Init (void)
 	Cvar_RegisterVariable (&v_kickroll);
 	Cvar_RegisterVariable (&v_kickpitch);
 	Cvar_RegisterVariable (&v_gunkick); //johnfitz
-	
+
 	Cvar_RegisterVariable (&r_viewmodel_quake); //MarkV
 }
 

@@ -849,7 +849,10 @@ static void Host_Map_f (void)
 	CL_Disconnect ();
 	Host_ShutdownServer(false);
 
-	key_dest = key_game;			// remove console or menu
+	if (key_dest == key_menu)
+		M_ToggleMenu(0);	//ask the menu to hide itself so we don't get pooped by our poor tracking of input state on the next line.
+	else
+		key_dest = key_game;			// remove console or menu
 	if (cls.state != ca_dedicated)
 		IN_UpdateGrabs();
 	SCR_BeginLoadingPlaque ();
@@ -1435,7 +1438,9 @@ static void Host_Loadgame_f (void)
 				memset (&ent->v, 0, qcvm->progs->entityfields * 4);
 			}
 			else {
+				SV_UnlinkEdict(ent);
 				memset (ent, 0, qcvm->edict_size);
+				ent->baseline = nullentitystate;
 			}
 			data = ED_ParseEdict (data, ent);
 

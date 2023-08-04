@@ -265,7 +265,7 @@ Returns 0.25 if a key was pressed and released during the frame,
 1.0 if held for the entire time
 ===============
 */
-float CL_KeyState (kbutton_t *key)
+float CL_KeyState (kbutton_t *key, qboolean isfinal)
 {
 	float		val;
 	qboolean	impulsedown, impulseup, down;
@@ -304,7 +304,8 @@ float CL_KeyState (kbutton_t *key)
 			val = 0.25;	// pressed and released this frame
 	}
 
-	key->state &= 1;		// clear impulses
+	if (isfinal)
+		key->state &= 1;		// clear impulses
 
 	return val;
 }
@@ -345,19 +346,19 @@ void CL_AdjustAngles (void)
 
 	if (!(in_strafe.state & 1))
 	{
-		cl.viewangles[YAW] -= speed*cl_yawspeed.value*CL_KeyState (&in_right);
-		cl.viewangles[YAW] += speed*cl_yawspeed.value*CL_KeyState (&in_left);
+		cl.viewangles[YAW] -= speed*cl_yawspeed.value*CL_KeyState (&in_right, true);
+		cl.viewangles[YAW] += speed*cl_yawspeed.value*CL_KeyState (&in_left, true);
 		cl.viewangles[YAW] = anglemod(cl.viewangles[YAW]);
 	}
 	if (in_klook.state & 1)
 	{
 		V_StopPitchDrift ();
-		cl.viewangles[PITCH] -= speed*cl_pitchspeed.value * CL_KeyState (&in_forward);
-		cl.viewangles[PITCH] += speed*cl_pitchspeed.value * CL_KeyState (&in_back);
+		cl.viewangles[PITCH] -= speed*cl_pitchspeed.value * CL_KeyState (&in_forward, true);
+		cl.viewangles[PITCH] += speed*cl_pitchspeed.value * CL_KeyState (&in_back, true);
 	}
 
-	up = CL_KeyState (&in_lookup);
-	down = CL_KeyState(&in_lookdown);
+	up = CL_KeyState (&in_lookup, true);
+	down = CL_KeyState(&in_lookdown, true);
 
 	cl.viewangles[PITCH] -= speed*cl_pitchspeed.value * up;
 	cl.viewangles[PITCH] += speed*cl_pitchspeed.value * down;
@@ -385,7 +386,7 @@ CL_BaseMove
 Send the intended movement message to the server
 ================
 */
-void CL_BaseMove (usercmd_t *cmd)
+void CL_BaseMove (usercmd_t *cmd, qboolean isfinal)
 {
 	Q_memset (cmd, 0, sizeof(*cmd));
 
@@ -396,20 +397,20 @@ void CL_BaseMove (usercmd_t *cmd)
 
 	if (in_strafe.state & 1)
 	{
-		cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_right);
-		cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_left);
+		cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_right, isfinal);
+		cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_left, isfinal);
 	}
 
-	cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_moveright);
-	cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_moveleft);
+	cmd->sidemove += cl_sidespeed.value * CL_KeyState (&in_moveright, isfinal);
+	cmd->sidemove -= cl_sidespeed.value * CL_KeyState (&in_moveleft, isfinal);
 
-	cmd->upmove += cl_upspeed.value * CL_KeyState (&in_up);
-	cmd->upmove -= cl_upspeed.value * CL_KeyState (&in_down);
+	cmd->upmove += cl_upspeed.value * CL_KeyState (&in_up, isfinal);
+	cmd->upmove -= cl_upspeed.value * CL_KeyState (&in_down, isfinal);
 
 	if (! (in_klook.state & 1) )
 	{
-		cmd->forwardmove += cl_forwardspeed.value * CL_KeyState (&in_forward);
-		cmd->forwardmove -= cl_backspeed.value * CL_KeyState (&in_back);
+		cmd->forwardmove += cl_forwardspeed.value * CL_KeyState (&in_forward, isfinal);
+		cmd->forwardmove -= cl_backspeed.value * CL_KeyState (&in_back, isfinal);
 	}
 
 //
@@ -423,50 +424,49 @@ void CL_BaseMove (usercmd_t *cmd)
 	}
 }
 
-void CL_FinishMove(usercmd_t *cmd)
+void CL_FinishMove(usercmd_t *cmd, qboolean isfinal)
 {
-	unsigned int bits;
+	static kbutton_t *buttons[] = {
+		&in_attack,
+		&in_jump,
+		&in_button3,
+		&in_button4,
+		&in_button3,
+		&in_button6,
+		&in_button7,
+		&in_button8,
+	};
+	unsigned int bits, i;
 	//
 	// send button bits
 	//
 	bits = 0;
 
-	if ( in_attack.state & 3 )
-		bits |= 1;
-	in_attack.state &= ~2;
-
-	if (in_jump.state & 3)
-		bits |= 2;
-	in_jump.state &= ~2;
-
-	if (in_button3.state & 3)
-		bits |= 4;
-	in_button3.state &= ~2;
-
-	if (in_button4.state & 3)
-		bits |= 8;
-	in_button4.state &= ~2;
-
-	if (in_button5.state & 3)
-		bits |= 16;
-	in_button5.state &= ~2;
-
-	if (in_button6.state & 3)
-		bits |= 32;
-	in_button6.state &= ~2;
-
-	if (in_button7.state & 3)
-		bits |= 64;
-	in_button7.state &= ~2;
-
-	if (in_button8.state & 3)
-		bits |= 128;
-	in_button8.state &= ~2;
+	for (i = 0; i < countof(buttons); i++)
+	{
+		if ( buttons[i]->state & 3 )
+		{
+			bits |= 1<<i;
+			if (isfinal)
+				buttons[i]->state &= ~2;
+		}
+	}
 
 	cmd->buttons = bits;
 	cmd->impulse = in_impulse;
 
-	in_impulse = 0;
+	if (isfinal)
+		in_impulse = 0;
+
+	cmd->forwardmove+= cl.accummoves[0];
+	cmd->sidemove	+= cl.accummoves[1];
+	cmd->upmove		+= cl.accummoves[2];
+	if (isfinal)
+		cl.accummoves[0]=cl.accummoves[1]=cl.accummoves[2]=0;
+
+	cmd->sequence	= cl.movemessages;
+	cmd->servertime	= cl.time;
+	cmd->seconds	= cmd->servertime - cl.lastcmdtime;
 }
 
 /*
@@ -572,14 +572,17 @@ void CL_SendMove (const usercmd_t *cmd)
 		}
 		in_impulse = 0;
 
-		cl.movecmds[cl.movemessages&MOVECMDS_MASK] = *cmd;
+		cl.movecmds[(cl.movemessages++)&MOVECMDS_MASK] = *cmd;
 
 	//
 	// allways dump the first two message, because it may contain leftover inputs
 	// from the last level
 	//
-		if (++cl.movemessages <= 2)
-			buf.cursize = dump;
+		if (cl.movemessages <= 2)
+		{
+			buf.cursize = dump;	//don't actually send it...
+			cl.movecmds[(cl.movemessages-1)&MOVECMDS_MASK].seconds = 0;	//and don't predict forwards. should fix prediction going weird at the start of the map.
+		}
 		else
 			S_Voip_Transmit(clcfte_voicechat, &buf);/*Spike: Add voice data*/
 	}

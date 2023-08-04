@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "pmove.h"
 
 server_t	sv;
 server_static_t	svs;
@@ -88,29 +89,12 @@ void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **sta
 		statsf[STAT_PUNCHANGLE_Y] = ent->v.punchangle[1];
 		statsf[STAT_PUNCHANGLE_Z] = ent->v.punchangle[2];
 	}
-/*
+
 	if (client->protocol_pext2 & PEXT2_PREDINFO)
 	{	//prediction needs some info on the server's rules
-		statsf[STAT_MOVEVARS_FRICTION] = sv_friction.value;
-		statsf[STAT_MOVEVARS_WATERFRICTION] = sv_waterfriction.value;
-		statsf[STAT_MOVEVARS_TICRATE] = host_maxfps.value;
-		statsf[STAT_MOVEVARS_TIMESCALE] = sv_gamespeed.value;
-		statsf[STAT_MOVEVARS_GRAVITY] = sv_gravity.value;
-		statsf[STAT_MOVEVARS_STOPSPEED] = sv_stopspeed.value;
-		statsf[STAT_MOVEVARS_MAXSPEED] = client->maxspeed;
-		statsf[STAT_MOVEVARS_SPECTATORMAXSPEED] = sv_spectatormaxspeed.value;
-		statsf[STAT_MOVEVARS_ACCELERATE] = sv_accelerate.value;
-		statsf[STAT_MOVEVARS_AIRACCELERATE] = sv_airaccelerate.value;
-		statsf[STAT_MOVEVARS_WATERACCELERATE] = sv_wateraccelerate.value;
-		statsf[STAT_MOVEVARS_ENTGRAVITY] = client->entgravity/sv_gravity.value;
-		statsf[STAT_MOVEVARS_JUMPVELOCITY] = sv_jumpvelocity.value;	//bah
-		statsf[STAT_MOVEVARS_EDGEFRICTION] = sv_edgefriction.value;
-		statsf[STAT_MOVEVARS_MAXAIRSPEED] = client->maxspeed;
-		statsf[STAT_MOVEVARS_STEPHEIGHT] = 18;
-//		statsf[STAT_MOVEVARS_AIRACCEL_QW] = 0;
-//		statsf[STAT_MOVEVARS_AIRACCEL_SIDEWAYS_FRICTION] = sv_gravity.value;
+		PMSV_SetMoveStats(ent, statsf, statsi);
 	}
-*/
+
 
 	for (i = 0; i < sv.numcustomstats; i++)
 	{
@@ -122,6 +106,20 @@ void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **sta
 		{
 		case ev_ext_integer:
 			statsi[sv.customstats[i].idx] = eval->_int;
+			break;
+		case ev_ext_uint32:
+			statsi[sv.customstats[i].idx] = eval->_uint32;
+			break;
+		case ev_ext_sint64:
+			statsi[sv.customstats[i].idx+0] = eval->_sint64;
+			statsi[sv.customstats[i].idx+1] = eval->_sint64>>32;
+			break;
+		case ev_ext_uint64:
+			statsi[sv.customstats[i].idx+0] = eval->_uint64;
+			statsi[sv.customstats[i].idx+1] = eval->_uint64>>32;
+			break;
+		case ev_ext_double:
+			statsf[sv.customstats[i].idx] = eval->_double;	//FIXME: precision loss
 			break;
 		case ev_entity:
 			statsi[sv.customstats[i].idx] = NUM_FOR_EDICT(PROG_TO_EDICT(eval->edict));
@@ -161,8 +159,8 @@ void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **sta
 static unsigned int SVFTE_DeltaPredCalcBits(entity_state_t *from, entity_state_t *to)
 {
 	unsigned int bits = 0;
-//	if (from && from->pmovetype != to->pmovetype)
-//		bits |= UFP_MOVETYPE;
+	if (from && from->pmovetype != to->pmovetype)
+		bits |= UFP_MOVETYPE;
 
 //	if (to->movement[0])
 //		bits |= UFP_FORWARD;
@@ -236,8 +234,8 @@ static unsigned int MSGFTE_DeltaCalcBits(entity_state_t *from, entity_state_t *t
 		bits |= UF_EFFECTS;
 	if (to->eflags != from->eflags)
 		bits |= UF_FLAGS;
-//	if (to->solidsize != from->solidsize)
-//		bits |= UF_SOLID;
+	if (to->solidsize != from->solidsize)
+		bits |= UF_SOLID;
 
 	if (to->scale != from->scale)
 		bits |= UF_SCALE;
@@ -278,6 +276,24 @@ static unsigned int MSGFTE_DeltaCalcBits(entity_state_t *from, entity_state_t *t
 	return bits;
 }
 
+static void MSG_WriteSize16 (sizebuf_t *sb, int sz)
+{
+	if (sz == ES_SOLID_BSP)
+		MSG_WriteShort(sb, ES_SOLID_BSP);
+	else if (sz)
+	{
+		//decode the 32bit version and recode it.
+		int x = sz & 255;
+		int zd = (sz >> 8) & 255;
+		int zu = ((sz >> 16) & 65535) - 32768;
+		MSG_WriteShort(sb,
+			((x>>3)<<0) |
+			((zd>>3)<<5) |
+			(((zu+32)>>3)<<10));
+	}
+	else
+		MSG_WriteShort(sb, 0);
+}
 static void MSGFTE_WriteEntityUpdate(unsigned int bits, entity_state_t *state, sizebuf_t *msg, unsigned int pext2, unsigned int protocolflags)
 {
 	unsigned int predbits = 0;
@@ -309,7 +325,7 @@ static void MSGFTE_WriteEntityUpdate(unsigned int bits, entity_state_t *state, s
 		}
 	}
 
-//	if (!(pext2 & PEXT2_NEWSIZEENCODING))	//was added at the same time
+	if (!(pext2 & PEXT2_NEWSIZEENCODING))	//was added at the same time
 		bits &= ~UF_BONEDATA;
 
 	/*check if we need more precision for some things*/
@@ -458,7 +474,7 @@ static void MSGFTE_WriteEntityUpdate(unsigned int bits, entity_state_t *state, s
 
 	if (bits & UF_SOLID)
 	{
-/*		if (pext2 & PEXT2_NEWSIZEENCODING)
+		if (pext2 & PEXT2_NEWSIZEENCODING)
 		{
 			if (!state->solidsize)
 				MSG_WriteByte(msg, 0);
@@ -481,7 +497,7 @@ static void MSGFTE_WriteEntityUpdate(unsigned int bits, entity_state_t *state, s
 		}
 		else
 			MSG_WriteSize16(msg, state->solidsize);
-*/	}
+	}
 
 	if (bits & UF_FLAGS)
 		MSG_WriteByte(msg, state->eflags);
@@ -1100,7 +1116,7 @@ SV_BuildEntityState
 copies edict state into a more compact entity_state_t with all the extension fields etc sorted out and neatened up for network precision.
 note: ignores viewmodelforclient and other client-specific stuff.
 */
-void SV_BuildEntityState(edict_t *ent, entity_state_t *state)
+void SV_BuildEntityState(client_t *client, edict_t *ent, entity_state_t *state)
 {
 	eval_t			*val;
 	state->eflags = 0;
@@ -1152,6 +1168,21 @@ void SV_BuildEntityState(edict_t *ent, entity_state_t *state)
 
 	state->pmovetype = 0;
 	state->velocity[0] = state->velocity[1] = state->velocity[2] = 0;
+
+	if (client && client->edict && (ent->v.owner == EDICT_TO_PROG(client->edict)))
+		state->solidsize = 0;
+	else if (ent->v.solid == SOLID_BSP || (ent->v.skin < 0 && ent->v.modelindex))
+		state->solidsize = ES_SOLID_BSP;
+	else if (ent->v.solid == SOLID_BBOX || ent->v.solid == SOLID_SLIDEBOX || ent->v.skin < 0)
+	{
+		state->solidsize = CLAMP(0, (int)-ent->v.mins[0], 255);
+		state->solidsize |= CLAMP(0, (int)-ent->v.mins[2], 255)<<8;
+		state->solidsize |= CLAMP(0, (int)((ent->v.maxs[2]+32768)), 65535)<<16;	/*up can be negative*/
+		if (state->solidsize == 0x80000000)
+			state->solidsize = ES_SOLID_NOT;	//point sized stuff should just be non-solid. you'll thank me for splitscreens.
+	}
+	else
+		state->solidsize = 0;
 }
 
 byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
@@ -1193,6 +1224,18 @@ static void SVFTE_BuildSnapshotForClient (client_t *client)
 	ent = NEXT_EDICT(qcvm->edicts);
 	for (e=1 ; e<maxentities ; e++, ent = NEXT_EDICT(ent))
 	{
+		if (ent->free)
+			goto invisible;
+		val = GetEdictFieldValue(ent, qcvm->extfields.customizeentityforclient);
+		if (val && val->function)
+		{
+			pr_global_struct->self = EDICT_TO_PROG(ent);	//ent being customised
+			pr_global_struct->other = proged;				//player they're being customised for
+			PR_ExecuteProgram(val->function);
+			if (!G_FLOAT(OFS_RETURN))
+				goto invisible;
+		}
+
 		eflags = 0;
 		emiteffect = GetEdictFieldValue(ent, qcvm->extfields.emiteffectnum)->_float;
 		iscsqc = cancsqc && GetEdictFieldEval(ent, SendEntity)->function;
@@ -1237,6 +1280,13 @@ invisible:
 			}
 		}
 
+		val = GetEdictFieldValue(ent, qcvm->extfields.nodrawtoclient);
+		if (val && val->edict == proged)
+			goto invisible;
+		val = GetEdictFieldValue(ent, qcvm->extfields.drawonlytoclient);
+		if (val && val->edict && val->edict != proged)
+			goto invisible;
+
 		//okay, we care about this entity.
 
 		if (iscsqc)
@@ -1255,20 +1305,30 @@ invisible:
 			maxents += 64;
 			ents = realloc(ents, maxents*sizeof(*ents));
 		}
-		
+
 		ents[numents].num = e;
-		SV_BuildEntityState(ent, &ents[numents].state);
+		SV_BuildEntityState(client, ent, &ents[numents].state);
 		if ((unsigned int)ents[numents].state.modelindex >= client->limit_models)
 			ents[numents].state.modelindex = 0;
 		if (ent == clent)	//add velocity, but we only care for the local player (should add prediction for other entities some time too).
 		{
-			ents[numents].state.pmovetype = 0;//ent->v.movetype;	//fixme: we don't do prediction, so don't tell the client that it can try
-			if ((int)ent->v.flags & FL_ONGROUND)
-				eflags |= EFLAGS_ONGROUND;
+			if (client->usingpmove)
+				ents[numents].state.pmovetype = ent->v.movetype;	//looks like prediction is available. assuming SV_RunClientCommand just calls runstandardplayerphysics then we can predict it with matching clientside stuff.
+			else
+				ents[numents].state.pmovetype = 0;	//fixme: we don't do prediction, so don't tell the client that it can try
+			if (ents[numents].state.pmovetype)
+			{	//add some extra pmove flags...
+				eval_t *pmflags = GetEdictFieldValue(ent, qcvm->extfields.pmove_flags);
+				if ((int)ent->v.flags & FL_ONGROUND)	//nq likes to know this for bob states.
+					ents[numents].state.pmovetype |= 0x80;
+				if ((int)pmflags->_float & 1)	//'jump_held' so no pogostick surprises.
+					ents[numents].state.pmovetype |= 0x40;
+			}
 			ents[numents].state.velocity[0] = ent->v.velocity[0]*8;
 			ents[numents].state.velocity[1] = ent->v.velocity[1]*8;
 			ents[numents].state.velocity[2] = ent->v.velocity[2]*8;
 		}
+		/*TODO: other players *should* provide movetype+msec+v_angle+movement+velocity info so they can be extrapolated by fancy clients*/
 		else if (ent->alpha == ENTALPHA_ZERO && !ent->v.effects)	//don't send invisible entities unless they have effects
 			continue;
 		val = GetEdictFieldValue(ent, qcvm->extfields.exteriormodeltoclient);
@@ -1479,15 +1539,16 @@ void SV_Init (void)
 	extern	cvar_t	sv_idealpitchscale;
 	extern	cvar_t	sv_aim;
 	extern	cvar_t	sv_altnoclip; //johnfitz
+	extern	cvar_t	sv_nqplayerphysics; //spike
 	extern	cvar_t	sv_public;	//spike
 	extern	cvar_t	sv_reportheartbeats;	//spike
 	extern	cvar_t	com_protocolname;	//spike
 	extern	cvar_t	net_masters[];	//spike
-	extern	cvar_t	rcon_password;	//spike, proquake-compatible rcon
+	extern	cvar_t	rcon_password, password;	//spike, proquake-compatible rcon
 	extern	cvar_t	sv_sound_watersplash;	//spike - making these changable is handy...
 	extern	cvar_t	sv_sound_land;			//spike - and also mutable...
 
-
+	PM_Register();
 	Cvar_RegisterVariable (&sv_maxvelocity);
 	Cvar_RegisterVariable (&sv_gravity);
 	Cvar_RegisterVariable (&sv_friction);
@@ -1507,6 +1568,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_gameplayfix_setmodelrealbox);
 	Cvar_RegisterVariable (&pr_checkextension);
 	Cvar_RegisterVariable (&sv_altnoclip); //johnfitz
+	Cvar_RegisterVariable (&sv_nqplayerphysics);	//spike
 
 	Cvar_RegisterVariable (&sv_sound_watersplash); //spike
 	Cvar_RegisterVariable (&sv_sound_land); //spike
@@ -1518,6 +1580,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_public);
 	Cvar_RegisterVariable (&sv_reportheartbeats);
 	Cvar_RegisterVariable (&com_protocolname);
+	Cvar_RegisterVariable (&password);
 	for (i = 0; net_masters[i].name; i++)
 		Cvar_RegisterVariable (&net_masters[i]);
 	Cvar_RegisterVariable (&rcon_password);
@@ -1944,6 +2007,7 @@ void SV_SendServerinfo (client_t *client)
 		}
 	}
 
+	client->pextknown = true;	//if its not set yet, it'll probably never get set.
 	cantruncate = client->message.cursize == 0;
 retry:
 	MSG_WriteByte (&client->message, svc_print);
@@ -2422,6 +2486,17 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 	ent = NEXT_EDICT(qcvm->edicts);
 	for (e=1 ; e<maxedict ; e++, ent = NEXT_EDICT(ent))
 	{
+		if (ent->free)
+			continue;
+		val = GetEdictFieldValue(ent, qcvm->extfields.customizeentityforclient);
+		if (val && val->function)
+		{
+			pr_global_struct->self = EDICT_TO_PROG(ent);	//ent being customised
+			pr_global_struct->other = EDICT_TO_PROG(client);//player they're being customised for
+			PR_ExecuteProgram(val->function);
+			if (!G_FLOAT(OFS_RETURN))
+				continue;
+		}
 
 		if (ent != clent)	// clent is ALLWAYS sent
 		{
@@ -2448,11 +2523,24 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 				continue;		// not visible
 		}
 
+		val = GetEdictFieldValue(ent, qcvm->extfields.nodrawtoclient);
+		if (val && val->edict == EDICT_TO_PROG(client))
+			continue;
+		val = GetEdictFieldValue(ent, qcvm->extfields.drawonlytoclient);
+		if (val && val->edict && val->edict != EDICT_TO_PROG(client))
+			continue;
+		val = GetEdictFieldValue(ent, qcvm->extfields.viewmodelforclient);
+		if (val && val->edict)	//can't handle this this for this player. can't cleanly attach it to their view so don't even treat it like drawonlytoclient.
+			continue;
+		val = GetEdictFieldValue(ent, qcvm->extfields.exteriormodeltoclient);
+		if (val && val->edict == EDICT_TO_PROG(client))	//can't handle this for this player. pretend its nodrawtoclient.
+			continue;
+
 		// johnfitz -- max size for protocol 15 is 18 bytes, not 16 as originally
 		// assumed here.  And, for protocol 85 the max size is actually 24 bytes.
-		// For float coords and angles the limit is 39. 
+		// For float coords and angles the limit is 40.
 		// FIXME: Use tighter limit according to protocol flags and send bits.
-		if (msg->cursize + 39 > msg->maxsize)
+		if (msg->cursize + 40 > msg->maxsize)
 		{
 			//johnfitz -- less spammy overflow message
 			if (!dev_overflows.packetsize || dev_overflows.packetsize + CONSOLE_RESPAM_TIME < realtime )
@@ -3014,7 +3102,7 @@ void SV_UpdateToReliableMessages (void)
 
 	for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
 	{
-		if (!client->active)
+		if (!client->active || !client->pextknown) //don't let it see random reliables before it sees the svc_serverdata packet.
 			continue;
 		SZ_Write (&client->message, sv.reliable_datagram.data, sv.reliable_datagram.cursize);
 	}
@@ -3408,7 +3496,6 @@ void SV_CreateBaseline (void)
 		{
 			svent->baseline.colormap = entnum;
 			svent->baseline.modelindex = SV_ModelIndex("progs/player.mdl");
-			svent->baseline.alpha = ENTALPHA_DEFAULT; //johnfitz -- alpha support
 		}
 		else
 		{
@@ -3424,7 +3511,7 @@ void SV_CreateBaseline (void)
 #ifndef ENTSCALE_QS_IS_BROKEN	//Older versions of QS do NOT support B_SCALE. If we use default baseline values here then we will simply fall back to spamming U_SCALE every time instead.
 		val = GetEdictFieldValue(svent, qcvm->extfields.scale);
 		if (val)
-			svent->baseline.scale = ENTALPHA_ENCODE(val->_float);
+			svent->baseline.scale = ENTSCALE_ENCODE(val->_float);
 #endif
 
 		//Spike -- baselines are now transmitted on a per-client basis.
@@ -3683,6 +3770,7 @@ void SV_SpawnServer (const char *server)
 
 // all setup is completed, any further precache statements are errors
 	sv.state = ss_active;
+	qcvm->worldlocked = true;
 
 // run two frames to allow everything to settle
 	host_frametime = 0.1;

@@ -36,7 +36,6 @@ extern cvar_t gl_fullbrights;
 extern cvar_t gl_farclip;
 extern cvar_t gl_overbright;
 extern cvar_t gl_overbright_models;
-extern cvar_t r_waterquality;
 extern cvar_t r_waterwarp;
 extern cvar_t r_oldskyleaf;
 extern cvar_t r_drawworld;
@@ -48,8 +47,7 @@ extern cvar_t r_nolerp_list;
 extern cvar_t r_noshadow_list;
 //johnfitz
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
-
-extern gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz
+cvar_t r_brokenturbbias = {"r_brokenturbbias", "1", CVAR_ARCHIVE}; //replicates QS's bug where it ignores texture coord offsets for water (breaking curved water volumes). we do NOT ignore scales though.
 
 
 /*
@@ -207,7 +205,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_stereomode);
 	Cvar_RegisterVariable (&r_clearcolor);
 	Cvar_SetCallback (&r_clearcolor, R_SetClearColor_f);
-	Cvar_RegisterVariable (&r_waterquality);
+	Cvar_RegisterVariable (&r_brokenturbbias);
 	Cvar_RegisterVariable (&r_waterwarp);
 	Cvar_RegisterVariable (&r_drawflat);
 	Cvar_RegisterVariable (&r_flatlightstyles);
@@ -246,84 +244,6 @@ void R_Init (void)
 
 	Sky_Init (); //johnfitz
 	Fog_Init (); //johnfitz
-}
-
-/*
-===============
-R_TranslatePlayerSkin -- johnfitz -- rewritten.  also, only handles new colors, not new skins
-===============
-*/
-void R_TranslatePlayerSkin (int playernum)
-{
-	//FIXME: if gl_nocolors is on, then turned off, the textures may be out of sync with the scoreboard colors.
-	if (!gl_nocolors.value)
-		if (playertextures[playernum])
-			TexMgr_ReloadImage (playertextures[playernum], cl.scores[playernum].shirt, cl.scores[playernum].pants);
-}
-
-/*
-===============
-R_TranslateNewPlayerSkin -- johnfitz -- split off of TranslatePlayerSkin -- this is called when
-the skin or model actually changes, instead of just new colors
-added bug fix from bengt jardup
-===============
-*/
-void R_TranslateNewPlayerSkin (int playernum)
-{
-	char		name[64];
-	byte		*pixels;
-	aliashdr_t	*paliashdr;
-	int		skinnum;
-
-//get correct texture pixels
-	currententity = &cl.entities[1+playernum];
-
-	if (!currententity->model || currententity->model->type != mod_alias)
-		return;
-
-	paliashdr = (aliashdr_t *)Mod_Extradata (currententity->model);
-
-	skinnum = currententity->skinnum;
-
-	if (paliashdr->numskins)
-	{
-		//TODO: move these tests to the place where skinnum gets received from the server
-		if (skinnum < 0 || skinnum >= paliashdr->numskins)
-		{
-			Con_DPrintf("(%d): Invalid player skin #%d\n", playernum, skinnum);
-			skinnum = 0;
-		}
-
-		pixels = (byte *)paliashdr + paliashdr->texels[skinnum]; // This is not a persistent place!
-
-	//upload new image
-		q_snprintf(name, sizeof(name), "player_%i", playernum);
-		playertextures[playernum] = TexMgr_LoadImage (currententity->model, name, paliashdr->skinwidth, paliashdr->skinheight,
-			SRC_INDEXED, pixels, paliashdr->gltextures[skinnum][0]->source_file, paliashdr->gltextures[skinnum][0]->source_offset, TEXPREF_PAD | TEXPREF_OVERWRITE);
-	}
-	else
-	{
-		q_snprintf(name, sizeof(name), "player_%i", playernum);
-		playertextures[playernum] = TexMgr_LoadImage (currententity->model, name, paliashdr->skinwidth, paliashdr->skinheight,
-			SRC_EXTERNAL, NULL, "skins/base.pcx", 0, TEXPREF_PAD | TEXPREF_OVERWRITE);
-	}
-
-//now recolor it
-	R_TranslatePlayerSkin (playernum);
-}
-
-/*
-===============
-R_NewGame -- johnfitz -- handle a game switch
-===============
-*/
-void R_NewGame (void)
-{
-	int i;
-
-	//clear playertexture pointers (the textures themselves were freed by texmgr_newgame)
-	for (i=0; i<MAX_SCOREBOARD; i++)
-		playertextures[i] = NULL;
 }
 
 /*

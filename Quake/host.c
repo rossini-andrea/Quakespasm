@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "bgmusic.h"
+#include "pmove.h"
 #include <setjmp.h>
 
 /*
@@ -87,6 +88,7 @@ cvar_t devstats = {"devstats","0",CVAR_NONE}; //johnfitz -- track developer stat
 
 cvar_t	campaign = {"campaign","0",CVAR_NONE}; // for the 2021 rerelease
 cvar_t	horde = {"horde","0",CVAR_NONE}; // for the 2021 rerelease
+cvar_t	sv_cheats = {"sv_cheats","0",CVAR_NONE}; // for the 2021 rerelease
 
 devstats_t dev_stats, dev_peakstats;
 overflowtimes_t dev_overflows; //this stores the last time overflow messages were displayed, not the last time overflows occured
@@ -110,7 +112,17 @@ Max_Fps_f -- ericw
 */
 static void Max_Fps_f (cvar_t *var)
 {
-	if (var->value > 72 || var->value <= 0)
+	if (var->value < 0)
+	{
+		if (!host_netinterval)
+			Con_Printf ("Using renderer/network isolation.\n");
+		host_netinterval = 1/-var->value;
+		if (host_netinterval > 1/10.f)	//don't let it get too jerky for other players
+			host_netinterval = 1/10.f;
+		if (host_netinterval < 1/150.f)	//don't let us spam servers too often. just abusive.
+			host_netinterval = 1/150.f;
+	}
+	else if (var->value > 72 || var->value <= 0)
 	{
 		if (!host_netinterval)
 			Con_Printf ("Using renderer/network isolation.\n");
@@ -323,6 +335,7 @@ void Host_InitLocal (void)
 
 	Cvar_RegisterVariable (&campaign);
 	Cvar_RegisterVariable (&horde);
+	Cvar_RegisterVariable (&sv_cheats);
 
 	Cvar_RegisterVariable (&pausable);
 
@@ -647,7 +660,7 @@ qboolean Host_FilterTime (float time)
 
 	//johnfitz -- max fps cvar
 	maxfps = CLAMP (10.f, host_maxfps.value, 1000.0);
-	if (host_maxfps.value && !cls.timedemo && realtime - oldrealtime < 1.0/maxfps)
+	if (host_maxfps.value>0 && !cls.timedemo && realtime - oldrealtime < 1.0/maxfps)
 		return false; // framerate is too high
 	//johnfitz
 
@@ -660,7 +673,7 @@ qboolean Host_FilterTime (float time)
 	//johnfitz
 	else if (host_framerate.value > 0)
 		host_frametime = host_framerate.value;
-	else if (host_maxfps.value)// don't allow really long or short frames
+	else if (host_maxfps.value>0)// don't allow really long or short frames
 		host_frametime = CLAMP (0.0001, host_frametime, 0.1); //johnfitz -- use CLAMP
 
 	return true;
@@ -704,6 +717,9 @@ void Host_ServerFrame (void)
 
 // set the time and clear the general datagram
 	SV_ClearDatagram ();
+
+//respond to cvar changes
+	PMSV_UpdateMovevars ();
 
 // check for new clients
 	SV_CheckForNewClients ();
@@ -750,13 +766,13 @@ static void CL_LoadCSProgs(void)
 	qboolean fullcsqc = false;
 	int i;
 	PR_ClearProgs(&cl.qcvm);
+	PR_SwitchQCVM(&cl.qcvm);
 	if (pr_checkextension.value && !cl_nocsqc.value)
 	{	//only try to use csqc if qc extensions are enabled.
 		char versionedname[MAX_QPATH];
 		unsigned int csqchash;
 		size_t csqcsize;
 		const char *val;
-		PR_SwitchQCVM(&cl.qcvm);
 		val = Info_GetKey(cl.serverinfo, "*csprogs", versionedname, sizeof(versionedname));
 		csqchash = (unsigned int)strtoul(val, NULL, 0);
 		if (*val)
@@ -802,6 +818,7 @@ static void CL_LoadCSProgs(void)
 				qcvm->extglobals.servercommandframe = NULL;
 			}
 
+			qcvm->rotatingbmodel = true;	//csqc always assumes this is enabled.
 			qcvm->GetModel = PR_CSQC_GetModel;
 			//set a few globals, if they exist
 			if (qcvm->extglobals.maxclients)
@@ -817,6 +834,7 @@ static void CL_LoadCSProgs(void)
 
 			//set a few worldspawn fields too
 			qcvm->edicts->v.solid = SOLID_BSP;
+			qcvm->edicts->v.movetype = MOVETYPE_PUSH;
 			qcvm->edicts->v.modelindex = 1;
 			qcvm->edicts->v.model = PR_SetEngineString(cl.worldmodel->name);
 			VectorCopy(cl.worldmodel->mins, qcvm->edicts->v.mins);
@@ -835,6 +853,7 @@ static void CL_LoadCSProgs(void)
 				G_FLOAT(OFS_PARM2) = 10000*maj + 100*(min) + QUAKESPASM_VER_PATCH;
 				PR_ExecuteProgram(qcvm->extfuncs.CSQC_Init);
 			}
+			qcvm->worldlocked = true;
 
 			if (fullcsqc)
 			{
@@ -844,9 +863,18 @@ static void CL_LoadCSProgs(void)
 			}
 		}
 		else
+		{
 			PR_ClearProgs(qcvm);
-		PR_SwitchQCVM(NULL);
+			qcvm->worldmodel = cl.worldmodel;
+			SV_ClearWorld();
+		}
 	}
+	else
+	{	//always initialsing at least part of it, allowing us to share some state with prediction.
+		qcvm->worldmodel = cl.worldmodel;
+		SV_ClearWorld();
+	}
+	PR_SwitchQCVM(NULL);
 }
 
 /*

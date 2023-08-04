@@ -45,8 +45,8 @@ unsigned int d_8to24table_fbright_fence[256];
 unsigned int d_8to24table_nobright[256];
 unsigned int d_8to24table_nobright_fence[256];
 unsigned int d_8to24table_conchars[256];
-unsigned int d_8to24table_shirt[256];
-unsigned int d_8to24table_pants[256];
+
+static void TexMgr_ColormapTexture_Free(struct gltexture_s *basetex);
 
 static struct
 {
@@ -76,7 +76,11 @@ static struct
 	{"RGBA4444",	"4444", GL_RGBA4,GL_RGBA,GL_UNSIGNED_SHORT_4_4_4_4,		 2, 1, 1, NULL},
 	{"RGBA5551",	"5551", GL_RGB5_A1,GL_RGBA,GL_UNSIGNED_SHORT_5_5_5_1,	 2, 1, 1, NULL},
 	{"L8",			"LUM8", GL_LUMINANCE8,GL_LUMINANCE,GL_UNSIGNED_BYTE,	 1, 1, 1, NULL},
-	{"E5BGR9",		"EXP5", GL_RGB9_E5,GL_RGB,GL_UNSIGNED_INT_5_9_9_9_REV,	 4, 1, 1, &gl_texture_rgtc/*gl3*/},
+#ifndef GL_VERSION_3_0
+	#define GL_RGB9_E5                        0x8C3D
+	#define GL_UNSIGNED_INT_5_9_9_9_REV       0x8C3E
+#endif
+	{"E5BGR9",		"EXP5", GL_RGB9_E5,GL_RGB,GL_UNSIGNED_INT_5_9_9_9_REV,	 4, 1, 1, &gl_texture_e5bgr9},
 #if defined(GL_EXT_texture_compression_s3tc) || defined(GL_EXT_texture_compression_dxt1)
 	{"BC1_RGBA",	"BC1",  GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,0,0,			 8, 4, 4, &gl_texture_s3tc},
 #endif
@@ -479,6 +483,9 @@ void TexMgr_FreeTexture (gltexture_t *kill)
 		return;
 	}
 
+	if (kill->flags & TEXPREF_COLOURMAPPED)
+		TexMgr_ColormapTexture_Free(kill);
+
 	if (active_gltextures == kill)
 	{
 		active_gltextures = kill->next;
@@ -551,6 +558,8 @@ TexMgr_DeleteTextureObjects
 void TexMgr_DeleteTextureObjects (void)
 {
 	gltexture_t *glt;
+
+	TexMgr_ColormapTexture_Free(NULL);
 
 	for (glt = active_gltextures; glt; glt = glt->next)
 	{
@@ -654,6 +663,8 @@ TexMgr_NewGame
 */
 void TexMgr_NewGame (void)
 {
+	TexMgr_ColormapTexture_Free(NULL);
+
 	TexMgr_FreeTextures (0, TEXPREF_PERSIST); //deletes all textures where TEXPREF_PERSIST is unset
 	TexMgr_LoadPalette ();
 }
@@ -1136,7 +1147,7 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
 	glTexImage2D (GL_TEXTURE_2D, 0, internalformat, glt->width, glt->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
 
 	// upload mipmaps
-	if (glt->flags & TEXPREF_MIPMAP)
+	if (glt->flags & TEXPREF_MIPMAP && !(glt->flags & TEXPREF_WARPIMAGE)) // warp image mipmaps are generated later
 	{
 		mipwidth = glt->width;
 		mipheight = glt->height;
@@ -1409,7 +1420,7 @@ static void TexMgr_LoadImage8 (gltexture_t *glt, byte *data)
 		}
 		else if (glt->pants.type == 1)
 		{
-			pants = glt->pants.rgb[0] * 16;
+			pants = glt->pants.basic * 16;
 			if (pants < 128)
 			{
 				for (i = 0; i < 16; i++)
@@ -1469,7 +1480,10 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 {
 	// upload it
 	GL_Bind (glt);
-	glTexImage2D (GL_TEXTURE_2D, 0, lightmap_bytes, glt->width, glt->height, 0, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	if (gl_lightmap_format == GL_RGB9_E5)
+		glTexImage2D (GL_TEXTURE_2D, 0, GL_RGB9_E5, glt->width, glt->height, 0, GL_RGB, GL_UNSIGNED_INT_5_9_9_9_REV, data);
+	else
+		glTexImage2D (GL_TEXTURE_2D, 0, lightmap_bytes, glt->width, glt->height, 0, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
 
 	// set filter modes
 	TexMgr_SetFilterModes (glt);
@@ -1690,6 +1704,8 @@ void TexMgr_ReloadImages (void)
 // switching to a boolean flag.
 	in_reload_images = true;
 
+	TexMgr_ColormapTexture_Free(NULL);	//just flush colourmapped cache instead of reloading them all unecessarily.
+
 	for (glt = active_gltextures; glt; glt = glt->next)
 	{
 		glGenTextures(1, &glt->texnum);
@@ -1713,6 +1729,107 @@ void TexMgr_ReloadNobrightImages (void)
 			TexMgr_ReloadImage(glt, plcolour_none, plcolour_none);
 }
 
+
+static struct
+{
+	struct gltexture_s *basetex;
+	struct gltexture_s *coloured;
+	plcolour_t upper;
+	plcolour_t lower;
+	double usetime;
+} colourmappedtexture[MAX_SCOREBOARD*2];
+static size_t numcolourmappedtextures;
+static void TexMgr_ColormapTexture_Free(struct gltexture_s *basetex)
+{
+	int i;
+	if (basetex)
+	{	//kill a single one.
+		basetex->flags &= ~TEXPREF_COLOURMAPPED;
+
+		for (i = 0; i < numcolourmappedtextures; i++)
+		{
+			if (colourmappedtexture[i].basetex == basetex)
+			{
+				TexMgr_FreeTexture(colourmappedtexture[i].coloured);
+				colourmappedtexture[i].basetex = NULL;
+				colourmappedtexture[i].usetime = FLT_MIN;
+				colourmappedtexture[i].coloured = NULL;
+				//may be multiple combinations of the same texture.
+			}
+		}
+	}
+	else
+	{	//kill em all
+		for (i = 0; i < numcolourmappedtextures; i++)
+		{
+			if (colourmappedtexture[i].coloured)
+				TexMgr_FreeTexture(colourmappedtexture[i].coloured);
+			colourmappedtexture[i].coloured = NULL;
+			colourmappedtexture[i].basetex = NULL;
+		}
+		numcolourmappedtextures = 0;
+	}
+}
+struct gltexture_s *TexMgr_ColormapTexture(struct gltexture_s *basetex, plcolour_t lower, plcolour_t upper)
+{
+	int oldest;
+	float otime;
+	int i;
+	struct gltexture_s *glt;
+	if (!basetex)
+		return NULL;
+	for (i = 0; i < numcolourmappedtextures; i++)
+	{
+		if (colourmappedtexture[i].basetex == basetex && colourmappedtexture[i].upper.key == upper.key && colourmappedtexture[i].lower.key == lower.key)
+		{
+			colourmappedtexture[i].usetime = realtime;
+			return colourmappedtexture[i].coloured;
+		}
+	}
+	if (numcolourmappedtextures < countof(colourmappedtexture))
+		oldest = numcolourmappedtextures++;	//just use a new one
+	else
+	{
+		otime = colourmappedtexture[oldest=0].usetime;
+		for (i = 1; i < countof(colourmappedtexture); i++)
+		{
+			if (otime > colourmappedtexture[i].usetime)
+				otime = colourmappedtexture[oldest=i].usetime;
+		}
+	}
+	if (colourmappedtexture[oldest].coloured)
+		TexMgr_FreeTexture(colourmappedtexture[oldest].coloured);	//was previously used...
+
+	colourmappedtexture[oldest].basetex = basetex;
+	colourmappedtexture[oldest].upper = upper;
+	colourmappedtexture[oldest].lower = lower;
+
+	//create the new texture from the existing one
+	colourmappedtexture[oldest].coloured = glt = TexMgr_NewTexture ();
+	glt->owner = NULL; //don't get clobbered by mistake
+	q_strlcpy (glt->name, basetex->name, sizeof(glt->name));
+	glt->width = basetex->width;
+	glt->height = basetex->height;
+	glt->flags = basetex->flags|TEXPREF_OVERWRITE;
+	glt->shirt = upper;
+	glt->pants = lower;
+	q_strlcpy (glt->source_file, basetex->source_file, sizeof(glt->source_file));
+	glt->source_offset = basetex->source_offset;
+	glt->source_format = basetex->source_format;
+	glt->source_width = basetex->source_width;
+	glt->source_height = basetex->source_height;
+	glt->source_crc = basetex->source_crc+1;	//something wrong so we don't get found so easily...
+
+	//and now reload it so it gets the proper colours.
+	TexMgr_ReloadImage(glt, upper, lower);
+
+	basetex->flags |= TEXPREF_COLOURMAPPED;	//so we clean up other textures spawned from it too.
+
+	colourmappedtexture[oldest].usetime = realtime;
+	return colourmappedtexture[oldest].coloured;
+}
+
+
 /*
 ================================================================================
 
@@ -1721,7 +1838,7 @@ void TexMgr_ReloadNobrightImages (void)
 ================================================================================
 */
 
-static GLuint	currenttexture[3] = {GL_UNUSED_TEXTURE, GL_UNUSED_TEXTURE, GL_UNUSED_TEXTURE}; // to avoid unnecessary texture sets
+static GLuint	currenttexture[4] = {GL_UNUSED_TEXTURE, GL_UNUSED_TEXTURE, GL_UNUSED_TEXTURE, GL_UNUSED_TEXTURE}; // to avoid unnecessary texture sets
 static GLenum	currenttarget = GL_TEXTURE0_ARB;
 qboolean	mtexenabled = false;
 
@@ -1797,11 +1914,11 @@ from our per-TMU cached texture binding table.
 */
 static void GL_DeleteTexture (gltexture_t *texture)
 {
+	int i;
 	glDeleteTextures (1, &texture->texnum);
 
-	if (texture->texnum == currenttexture[0]) currenttexture[0] = GL_UNUSED_TEXTURE;
-	if (texture->texnum == currenttexture[1]) currenttexture[1] = GL_UNUSED_TEXTURE;
-	if (texture->texnum == currenttexture[2]) currenttexture[2] = GL_UNUSED_TEXTURE;
+	for (i = 0; i < countof(currenttexture); i++)
+		if (texture->texnum == currenttexture[i]) currenttexture[i] = GL_UNUSED_TEXTURE;
 
 	texture->texnum = 0;
 }
@@ -1818,7 +1935,7 @@ Call this after changing the binding outside of GL_Bind.
 void GL_ClearBindings(void)
 {
 	int i;
-	for (i = 0; i < 3; i++)
+	for (i = 0; i < countof(currenttexture); i++)
 	{
 		currenttexture[i] = GL_UNUSED_TEXTURE;
 	}

@@ -27,9 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_drawflat, gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale;
 
-//up to 16 color translated skins
-gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz -- changed to an array of pointers
-
 #define NUMVERTEXNORMALS	162
 
 float	r_avertexnormals[NUMVERTEXNORMALS][3] =
@@ -88,10 +85,13 @@ typedef struct
 
 	// uniforms used in frag shader
 	GLuint texLoc;
+	GLuint lowerTexLoc;
+	GLuint upperTexLoc;
 	GLuint fullbrightTexLoc;
 	GLuint useFullbrightTexLoc;
 	GLuint useOverbrightLoc;
 	GLuint useAlphaTestLoc;
+	GLuint colorTintLoc;
 } aliasglsl_t;
 static aliasglsl_t r_alias_glsl[ALIAS_GLSL_MODES];
 
@@ -241,23 +241,28 @@ void GLAlias_CreateShaders (void)
 		"#version 110\n"
 		"\n"
 		"uniform sampler2D Tex;\n"
+		"uniform sampler2D LowerTex;\n"	//team colour
+		"uniform sampler2D UpperTex;\n"	//personal colour
 		"uniform sampler2D FullbrightTex;\n"
 		"uniform bool UseFullbrightTex;\n"
 		"uniform bool UseOverbright;\n"
 		"uniform bool UseAlphaTest;\n"
+		"uniform vec4 ColourTint[3];\n"	//base+bot+top+fb
 		"\n"
 		"varying float FogFragCoord;\n"
 		"\n"
 		"void main()\n"
 		"{\n"
-		"	vec4 result = texture2D(Tex, gl_TexCoord[0].xy);\n"
+		"	vec4 result = texture2D(Tex, gl_TexCoord[0].xy);\n"	//base
+		"	if (ColourTint[0].a != 0.0) result.rgb += texture2D(LowerTex, gl_TexCoord[0].xy).rgb * ColourTint[0].rgb;\n"	//team/lower/trousers
+		"	if (ColourTint[1].a != 0.0) result.rgb += texture2D(UpperTex, gl_TexCoord[0].xy).rgb * ColourTint[1].rgb;\n"	//personal/upper/torso
 		"	if (UseAlphaTest && (result.a < 0.666))\n"
 		"		discard;\n"
-		"	result *= gl_Color;\n"
+		"	result *= gl_Color;\n"	//vertex lighting results (and colormod).
 		"	if (UseOverbright)\n"
 		"		result.rgb *= 2.0;\n"
 		"	if (UseFullbrightTex)\n"
-		"		result += texture2D(FullbrightTex, gl_TexCoord[0].xy);\n"
+		"		result += texture2D(FullbrightTex, gl_TexCoord[0].xy) * ColourTint[2];\n" //fullbrights (with glowmod)
 		"	result = clamp(result, 0.0, 1.0);\n"
 		"	float fog = exp(-gl_Fog.density * gl_Fog.density * FogFragCoord * FogFragCoord);\n"
 		"	fog = clamp(fog, 0.0, 1.0) * gl_Fog.color.a;\n"
@@ -303,10 +308,21 @@ void GLAlias_CreateShaders (void)
 			glsl->shadevectorLoc = GL_GetUniformLocation (&glsl->program, "ShadeVector");
 			glsl->lightColorLoc = GL_GetUniformLocation (&glsl->program, "LightColor");
 			glsl->texLoc = GL_GetUniformLocation (&glsl->program, "Tex");
+			glsl->lowerTexLoc = GL_GetUniformLocation (&glsl->program, "LowerTex");
+			glsl->upperTexLoc = GL_GetUniformLocation (&glsl->program, "UpperTex");
 			glsl->fullbrightTexLoc = GL_GetUniformLocation (&glsl->program, "FullbrightTex");
 			glsl->useFullbrightTexLoc = GL_GetUniformLocation (&glsl->program, "UseFullbrightTex");
 			glsl->useOverbrightLoc = GL_GetUniformLocation (&glsl->program, "UseOverbright");
 			glsl->useAlphaTestLoc = GL_GetUniformLocation (&glsl->program, "UseAlphaTest");
+			glsl->colorTintLoc = GL_GetUniformLocation (&glsl->program, "ColourTint");
+
+			//we can do this here, its not going to change.
+			GL_UseProgramFunc (glsl->program);
+			GL_Uniform1iFunc (glsl->texLoc, 0);
+			GL_Uniform1iFunc (glsl->fullbrightTexLoc, 1);
+			GL_Uniform1iFunc (glsl->lowerTexLoc, 2);
+			GL_Uniform1iFunc (glsl->upperTexLoc, 3);
+			GL_UseProgramFunc (0);
 		}
 	}
 }
@@ -325,8 +341,9 @@ Supports optional overbright, optional fullbright pixels.
 Based on code by MH from RMQEngine
 =============
 */
-void GL_DrawAliasFrame_GLSL (aliasglsl_t *glsl, aliashdr_t *paliashdr, lerpdata_t lerpdata, gltexture_t *tx, gltexture_t *fb)
+static void GL_DrawAliasFrame_GLSL (aliasglsl_t *glsl, aliashdr_t *paliashdr, lerpdata_t lerpdata, struct skintextures_s tex, entity_t *e)
 {
+	GLfloat	tints[3][4];
 	float	blend;
 
 	if (lerpdata.pose1 != lerpdata.pose2)
@@ -394,28 +411,65 @@ void GL_DrawAliasFrame_GLSL (aliasglsl_t *glsl, aliashdr_t *paliashdr, lerpdata_
 		break;
 	}
 
+#define MyVectorScale(a,s,b) do{(b)[0]=(s)*(a)[0];(b)[1]=(s)*(a)[1];(b)[2]=(s)*(a)[2];}while(0)
+	if (e->netstate.colormap > 0 && e->netstate.colormap <= cl.maxclients)
+	{
+		scoreboard_t *sb = &cl.scores[e->netstate.colormap-1];
+		byte *pal;
+		pal = CL_PLColours_ToRGB(&sb->pants);
+		MyVectorScale(pal, 1.0/255, tints[0]);
+
+		pal = CL_PLColours_ToRGB(&sb->shirt);
+		MyVectorScale(pal, 1.0/255, tints[1]);
+	}
+	else
+	{
+		MyVectorScale((byte*)&d_8to24table[BOTTOM_RANGE+15], 1.0/255, tints[0]);
+		MyVectorScale((byte*)&d_8to24table[TOP_RANGE+15], 1.0/255, tints[1]);
+	}
+	tints[0][3] = 1;
+	tints[1][3] = 1;
+	MyVectorScale(e->netstate.glowmod, 1.0/32, tints[2]); tints[2][3] = 1;
+
+	// set textures
+	GL_SelectTexture (GL_TEXTURE0);
+	GL_Bind (tex.base);
+
+	if (tex.luma)
+	{
+		GL_SelectTexture (GL_TEXTURE1);
+		GL_Bind (tex.luma);
+	}
+	else
+		tints[2][0] = tints[2][1] = tints[2][2] = tints[2][3] = 0;
+
+	if (tex.lower)
+	{
+		GL_SelectTexture (GL_TEXTURE2);
+		GL_Bind (tex.lower);
+	}
+	else
+		tints[0][0] = tints[0][1] = tints[0][2] = tints[0][3] = 0;	//ask the glsl to not read it
+
+	if (tex.upper)
+	{
+		GL_SelectTexture (GL_TEXTURE3);
+		GL_Bind (tex.upper);
+	}
+	else
+		tints[1][0] = tints[1][1] = tints[1][2] = tints[1][3] = 0;
+
 // set uniforms
 	if (glsl->blendLoc != -1)
 		GL_Uniform1fFunc (glsl->blendLoc, blend);
 	if (glsl->bonesLoc != -1)
 		GL_Uniform4fvFunc (glsl->bonesLoc, paliashdr->numbones*3, lerpdata.bonestate->mat);
 	GL_Uniform3fFunc (glsl->shadevectorLoc, shadevector[0], shadevector[1], shadevector[2]);
-	GL_Uniform4fFunc (glsl->lightColorLoc, lightcolor[0], lightcolor[1], lightcolor[2], entalpha);
-	GL_Uniform1iFunc (glsl->texLoc, 0);
-	GL_Uniform1iFunc (glsl->fullbrightTexLoc, 1);
-	GL_Uniform1iFunc (glsl->useFullbrightTexLoc, (fb != NULL) ? 1 : 0);
+	GL_Uniform4fFunc (glsl->lightColorLoc, lightcolor[0], lightcolor[1], lightcolor[2], entalpha);	//this includes colormod
+	GL_Uniform1iFunc (glsl->useFullbrightTexLoc, (tex.luma != NULL) ? 1 : 0);
 	GL_Uniform1fFunc (glsl->useOverbrightLoc, overbright ? 1 : 0);
 	GL_Uniform1iFunc (glsl->useAlphaTestLoc, (currententity->model->flags & MF_HOLEY) ? 1 : 0);
-
-// set textures
-	GL_SelectTexture (GL_TEXTURE0);
-	GL_Bind (tx);
-
-	if (fb)
-	{
-		GL_SelectTexture (GL_TEXTURE1);
-		GL_Bind (fb);
-	}
+	GL_Uniform4fvFunc(glsl->colorTintLoc, countof(tints), tints[0]);	//colourmapping and glowmod.
 
 // draw
 	glDrawElements (GL_TRIANGLES, paliashdr->numindexes, GL_UNSIGNED_SHORT, currententity->model->meshindexesvboptr+paliashdr->eboofs);
@@ -958,15 +1012,17 @@ void R_SetupAliasLighting (entity_t	*e)
 		}
 		else
 		{
-			vec3_t		lpos;
 			origin = e->origin;
-			VectorCopy (origin, lpos);
-			// start the light trace from slightly above the origin
-			// this helps with models whose origin is below ground level, but are otherwise visible
-			// (e.g. some of the candles in the DOTM start map, which would otherwise appear black)
-			if (e->model->maxs[2] > 0)
+			// if the initial trace is completely black, try again from above
+			// this helps with models whose origin is slightly below ground level
+			// (e.g. some of the candles in the DOTM start map)
+			if (!R_LightPoint (origin))
+			{
+				vec3_t		lpos;
+				VectorCopy (origin, lpos);
 				lpos[2] += e->model->maxs[2] * 0.5f;
-			R_LightPoint (lpos);
+				R_LightPoint (lpos);
+			}
 		}
 
 		//add dlights
@@ -982,7 +1038,7 @@ void R_SetupAliasLighting (entity_t	*e)
 		}
 
 		// minimum light value on gun (24)
-		if (e == &cl.viewent)
+		if (e->eflags & EFLAGS_VIEWMODEL)
 		{
 			add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
 			if (add > 0.0f)
@@ -1052,7 +1108,7 @@ void R_DrawAliasModel (entity_t *e)
 	aliasglsl_t *glsl;
 	aliashdr_t	*paliashdr;
 	int		anim, skinnum;
-	gltexture_t	*tx, *fb;
+	struct skintextures_s tex;
 	lerpdata_t	lerpdata;
 	qboolean	alphatest = !!(e->model->flags & MF_HOLEY);
 	int surf;
@@ -1069,6 +1125,9 @@ void R_DrawAliasModel (entity_t *e)
 
 	if (e->eflags & EFLAGS_VIEWMODEL)
 	{
+		if (skyroom_drawing)
+			return;	//no viewmodels inside skyrooms!
+
 		//transform it relative to the view, by rebuilding the modelview matrix without the view position.
 		glPushMatrix ();
 		glLoadIdentity();
@@ -1076,6 +1135,10 @@ void R_DrawAliasModel (entity_t *e)
 		glRotatef (90,  0, 0, 1);	    // put Z going up
 
 		glDepthRange (0, 0.3);
+
+		//FIXME: this needs to go. combine with depthrange and explicit viewmodel-only fov into a different projection matrix..
+		if (scr_fov.value > 90.f && cl_gun_fovscale.value)
+			fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
 	}
 	else
 	{
@@ -1090,10 +1153,6 @@ void R_DrawAliasModel (entity_t *e)
 		//
 		glPushMatrix ();
 	}
-
-	//FIXME: this needs to go. combine with depthrange and explicit viewmodel-only fov into a different projection matrix..
-	if (e == &cl.viewent && scr_fov.value > 90.f && cl_gun_fovscale.value)
-		fovscale = tan(scr_fov.value * (0.5f * M_PI / 180.f));
 
 	R_RotateForEntity (lerpdata.origin, lerpdata.angles, e->netstate.scale);
 	glTranslatef (paliashdr->scale_origin[0], paliashdr->scale_origin[1] * fovscale, paliashdr->scale_origin[2] * fovscale);
@@ -1150,21 +1209,39 @@ void R_DrawAliasModel (entity_t *e)
 		}
 		if (paliashdr->numskins <= 0)
 		{
-			tx = NULL; // NULL will give the checkerboard texture
-			fb = NULL;
+			tex.base = tex.luma = tex.lower = tex.upper = NULL; // NULL will give the checkerboard texture
 		}
 		else
+			tex = paliashdr->textures[skinnum][anim];
+		if (!gl_nocolors.value)
 		{
-			tx = paliashdr->gltextures[skinnum][anim];
-			fb = paliashdr->fbtextures[skinnum][anim];
-		} 
-		if (e->netstate.colormap && !gl_nocolors.value)
-		{
-			if ((uintptr_t)e >= (uintptr_t)&cl.entities[1] && (uintptr_t)e <= (uintptr_t)&cl.entities[cl.maxclients]) /* && !strcmp (currententity->model->name, "progs/player.mdl") */
-				tx = playertextures[e - cl.entities - 1];
+			if (e->eflags & EFLAGS_COLOURMAPPED)
+			{	//support for dp's self.colormap = 4096 | top*16 | bottom; thing (solves corpses changing colours, can't handle rich colours though)
+				if (tex.base && tex.base->source_format == SRC_INDEXED && !tex.upper && !tex.lower)
+				{
+					struct gltexture_s *t = TexMgr_ColormapTexture(tex.base, CL_PLColours_FromLegacy(e->netstate.colormap&15), CL_PLColours_FromLegacy(e->netstate.colormap>>4));
+					if (t)
+						tex.base = t;
+				}
+			}
+			else if (e->netstate.colormap>=1&&e->netstate.colormap<=cl.maxclients)
+			{	//despite being able to handle _shirt+_pants textures in our glsl, we still prefer to generate per-player textures.
+				//1) works with non-glsl.
+				//2) preserves the weird non-linear ranges.
+				//3) ... and without breaking those ranges on models that are NOT colourmapped (the lower's remapped range is the worst of the non-linear ranges, so would make too many models ugly).
+				//so we only use the shirt+pans stuff when using external textures
+				//on the plus side, we do use a lookup so we don't break quakerally. csqc also benefits from not needing to worry about edict numbers.
+				if (tex.base && tex.base->source_format == SRC_INDEXED && !tex.upper && !tex.lower)
+				{
+					scoreboard_t *sb = &cl.scores[e->netstate.colormap-1];
+					struct gltexture_s *t = TexMgr_ColormapTexture(tex.base, sb->pants, sb->shirt);
+					if (t)
+						tex.base = t;
+				}
+			}
 		}
 		if (!gl_fullbrights.value)
-			fb = NULL;
+			tex.luma = NULL;
 
 		//
 		// draw it
@@ -1178,14 +1255,14 @@ void R_DrawAliasModel (entity_t *e)
 		}
 		else if (r_fullbright_cheatsafe)
 		{
-			GL_Bind (tx);
+			GL_Bind (tex.base);
 			shading = false;
 			glColor4f(1,1,1,entalpha);
 			GL_DrawAliasFrame (paliashdr, lerpdata);
-			if (fb)
+			if (tex.luma)
 			{
 				glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-				GL_Bind(fb);
+				GL_Bind(tex.luma);
 				glEnable(GL_BLEND);
 				glBlendFunc (GL_ONE, GL_ONE);
 				glDepthMask(GL_FALSE);
@@ -1210,20 +1287,20 @@ void R_DrawAliasModel (entity_t *e)
 	// r_alias_program will be 0.
 		else if (glsl->program != 0 && (paliashdr->numbones <= glsl->maxbones||!lerpdata.bonestate))
 		{
-			GL_DrawAliasFrame_GLSL (glsl, paliashdr, lerpdata, tx, fb);
+			GL_DrawAliasFrame_GLSL (glsl, paliashdr, lerpdata, tex, e);
 		}
 		else if (overbright)
 		{
-			if  (gl_texture_env_combine && gl_mtexable && gl_texture_env_add && fb) //case 1: everything in one pass
+			if  (gl_texture_env_combine && gl_mtexable && gl_texture_env_add && tex.luma) //case 1: everything in one pass
 			{
-				GL_Bind (tx);
+				GL_Bind (tex.base);
 				glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_EXT);
 				glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB_EXT, GL_MODULATE);
 				glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB_EXT, GL_TEXTURE);
 				glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE1_RGB_EXT, GL_PRIMARY_COLOR_EXT);
 				glTexEnvf(GL_TEXTURE_ENV, GL_RGB_SCALE_EXT, 2.0f);
 				GL_EnableMultitexture(); // selects TEXTURE1
-				GL_Bind (fb);
+				GL_Bind (tex.luma);
 				glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_ADD);
 //				glEnable(GL_BLEND);
 				GL_DrawAliasFrame (paliashdr, lerpdata);
@@ -1234,7 +1311,7 @@ void R_DrawAliasModel (entity_t *e)
 			else if (gl_texture_env_combine) //case 2: overbright in one pass, then fullbright pass
 			{
 			// first pass
-				GL_Bind(tx);
+				GL_Bind(tex.base);
 				glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_COMBINE_EXT);
 				glTexEnvi(GL_TEXTURE_ENV, GL_COMBINE_RGB_EXT, GL_MODULATE);
 				glTexEnvi(GL_TEXTURE_ENV, GL_SOURCE0_RGB_EXT, GL_TEXTURE);
@@ -1244,10 +1321,10 @@ void R_DrawAliasModel (entity_t *e)
 				glTexEnvf(GL_TEXTURE_ENV, GL_RGB_SCALE_EXT, 1.0f);
 				glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 			// second pass
-				if (fb)
+				if (tex.luma)
 				{
 					glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-					GL_Bind(fb);
+					GL_Bind(tex.luma);
 					glEnable(GL_BLEND);
 					glBlendFunc (GL_ONE, GL_ONE);
 					glDepthMask(GL_FALSE);
@@ -1265,7 +1342,7 @@ void R_DrawAliasModel (entity_t *e)
 			else //case 3: overbright in two passes, then fullbright pass
 			{
 			// first pass
-				GL_Bind(tx);
+				GL_Bind(tex.base);
 				glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 				GL_DrawAliasFrame (paliashdr, lerpdata);
 			// second pass -- additive with black fog, to double the object colors but not the fog color
@@ -1280,10 +1357,10 @@ void R_DrawAliasModel (entity_t *e)
 				glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 				glDisable(GL_BLEND);
 			// third pass
-				if (fb)
+				if (tex.luma)
 				{
 					glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-					GL_Bind(fb);
+					GL_Bind(tex.luma);
 					glEnable(GL_BLEND);
 					glBlendFunc (GL_ONE, GL_ONE);
 					glDepthMask(GL_FALSE);
@@ -1301,13 +1378,13 @@ void R_DrawAliasModel (entity_t *e)
 		}
 		else
 		{
-			if (gl_mtexable && gl_texture_env_add && fb) //case 4: fullbright mask using multitexture
+			if (gl_mtexable && gl_texture_env_add && tex.luma) //case 4: fullbright mask using multitexture
 			{
 				GL_DisableMultitexture(); // selects TEXTURE0
-				GL_Bind (tx);
+				GL_Bind (tex.base);
 				glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 				GL_EnableMultitexture(); // selects TEXTURE1
-				GL_Bind (fb);
+				GL_Bind (tex.luma);
 				glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_ADD);
 				glEnable(GL_BLEND);
 				GL_DrawAliasFrame (paliashdr, lerpdata);
@@ -1318,13 +1395,13 @@ void R_DrawAliasModel (entity_t *e)
 			else //case 5: fullbright mask without multitexture
 			{
 			// first pass
-				GL_Bind(tx);
+				GL_Bind(tex.base);
 				glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 				GL_DrawAliasFrame (paliashdr, lerpdata);
 			// second pass
-				if (fb)
+				if (tex.luma)
 				{
-					GL_Bind(fb);
+					GL_Bind(tex.luma);
 					glEnable(GL_BLEND);
 					glBlendFunc (GL_ONE, GL_ONE);
 					glDepthMask(GL_FALSE);

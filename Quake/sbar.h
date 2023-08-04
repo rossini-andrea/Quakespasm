@@ -42,5 +42,10 @@ void Sbar_IntermissionOverlay (void);
 
 void Sbar_FinaleOverlay (void);
 
+//csqc needs some of the helpers.
+extern int	fragsort[MAX_SCOREBOARD];
+extern int	scoreboardlines;
+extern int	Sbar_ColorForMap (int m);
+
 #endif	/* _QUAKE_SBAR_H */
 

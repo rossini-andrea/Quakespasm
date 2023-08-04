@@ -549,7 +549,7 @@ void PR_ExecuteProgram (func_t fnum)
 #ifdef PARANOID
 		NUM_FOR_EDICT(ed);	// Make sure it's in range
 #endif
-		if (ed == (edict_t *)qcvm->edicts && sv.state == ss_active)
+		if (ed == (edict_t *)qcvm->edicts && qcvm->worldlocked)
 		{
 			qcvm->xstatement = st - qcvm->statements;
 			PR_RunError("assignment to world entity");
@@ -653,4 +653,3 @@ void PR_ExecuteProgram (func_t fnum)
 #undef OPA
 #undef OPB
 #undef OPC
-

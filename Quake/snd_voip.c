@@ -58,24 +58,22 @@ void Sys_CloseLibrary(dllhandle_t *lib);
 
 #include "arch_def.h"
 
-#ifdef _WIN32
-#include <windows.h>
 void Sys_CloseLibrary(dllhandle_t *lib)
 {
-	FreeLibrary((HMODULE)lib);
+	SDL_UnloadObject((void*)lib);
 }
 dllhandle_t *Sys_LoadLibrary(const char *name, dllfunction_t *funcs)
 {
 	int i;
-	HMODULE lib;
+	void *lib;
 
-	lib = LoadLibrary(name);
+	lib = SDL_LoadObject(name);
 	if (!lib)
 	{
 #ifdef _WIN64
-		lib = LoadLibrary(va("%s_64", name));
+		lib = SDL_LoadObject(va("%s_64", name));
 #elif defined(_WIN32)
-		lib = LoadLibrary(va("%s_32", name));
+		lib = SDL_LoadObject(va("%s_32", name));
 #endif
 		if (!lib)
 			return NULL;
@@ -85,7 +83,7 @@ dllhandle_t *Sys_LoadLibrary(const char *name, dllfunction_t *funcs)
 	{
 		for (i = 0; funcs[i].name; i++)
 		{
-			*funcs[i].funcptr = GetProcAddress(lib, funcs[i].name);
+			*funcs[i].funcptr = SDL_LoadFunction(lib, funcs[i].name);
 			if (!*funcs[i].funcptr)
 				break;
 		}
@@ -99,50 +97,6 @@ dllhandle_t *Sys_LoadLibrary(const char *name, dllfunction_t *funcs)
 
 	return (dllhandle_t*)lib;
 }
-#elif defined(PLATFORM_UNIX)
-//unixes should have a dlopen (this test includes osx)
-#include <dlfcn.h>
-void Sys_CloseLibrary(dllhandle_t *lib)
-{
-	dlclose((void*)lib);
-}
-dllhandle_t *Sys_LoadLibrary(const char *name, dllfunction_t *funcs)
-{
-	int i;
-	dllhandle_t *lib;
-
-	lib = dlopen (name, RTLD_LAZY|RTLD_LOCAL);
-	if (!lib)
-		return NULL;
-
-	if (funcs)
-	{
-		for (i = 0; funcs[i].name; i++)
-		{
-			*funcs[i].funcptr = dlsym(lib, funcs[i].name);
-			if (!*funcs[i].funcptr)
-				break;
-		}
-		if (funcs[i].name)
-		{
-			Con_SafePrintf("Symbol %s missing in module %s\n", funcs[i].name, name);
-			Sys_CloseLibrary((dllhandle_t*)lib);
-			lib = NULL;
-		}
-	}
-
-	return (dllhandle_t*)lib;
-}
-#else
-void Sys_CloseLibrary(dllhandle_t *lib)
-{
-}
-dllhandle_t *Sys_LoadLibrary(const char *name, dllfunction_t *funcs)
-{
-	Con_SafePrintf("Sys_LoadLibrary(%s) is not implemented on this platform\n", name);
-	return NULL;
-}
-#endif
 
 
 /*****************************************************************************************************************************/

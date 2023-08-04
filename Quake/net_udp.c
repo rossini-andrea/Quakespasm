@@ -44,6 +44,7 @@ static struct in6_addr	myAddrv6;
 
 sys_socket_t UDP4_Init (void)
 {
+	int i;
 	char	*tst;
 	struct qsockaddr	addr;
 
@@ -51,13 +52,28 @@ sys_socket_t UDP4_Init (void)
 		return INVALID_SOCKET;
 
 	myAddr4 = htonl(INADDR_LOOPBACK);
-#ifdef __linux__
-	//gethostbyname(gethostname()) is only supported if the hostname can be looked up on an actual name server
-	//this means its usable as a test to see if other hosts can see it, but means we cannot use it to find out the local address.
-	//it also means stalls and slow loading and other undesirable behaviour, so lets stop doing this legacy junk.
-	//we probably have multiple interfaces nowadays anyway (wan and lan and wifi and localhost and linklocal addresses and zomgwtf).
-#else
+	i = COM_CheckParm ("-ip");
+	if (i)
 	{
+		if (i < com_argc-1)
+		{
+			myAddr4 = inet_addr(com_argv[i + 1]);
+			if (myAddr4 == INADDR_NONE)
+				Sys_Error ("%s is not a valid IP address", com_argv[i + 1]);
+		}
+		else
+		{
+			Sys_Error ("UDP4_Init: you must specify an IP address after -ip");
+		}
+	}
+	else
+	{
+#ifdef __linux__
+		//gethostbyname(gethostname()) is only supported if the hostname can be looked up on an actual name server
+		//this means its usable as a test to see if other hosts can see it, but means we cannot use it to find out the local address.
+		//it also means stalls and slow loading and other undesirable behaviour, so lets stop doing this legacy junk.
+		//we probably have multiple interfaces nowadays anyway (wan and lan and wifi and localhost and linklocal addresses and zomgwtf).
+#else
 		// determine my name & address
 		int	err;
 		char	buff[MAXHOSTNAMELEN];
@@ -92,12 +108,10 @@ sys_socket_t UDP4_Init (void)
 				Con_SafePrintf("UDP4_Init: address from gethostbyname not IPv4\n");
 			}
 			else
-			{
 				myAddr4 = *(in_addr_t *)local->h_addr_list[0];
-			}
 		}
-	}
 #endif
+	}
 
 	if ((net_controlsocket4 = UDP4_OpenSocket(0)) == INVALID_SOCKET)
 	{

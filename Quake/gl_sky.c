@@ -734,7 +734,7 @@ void Sky_ProcessEntities (void)
 	{
 		e = cl_visedicts[i];
 
-		if (e->model->type != mod_brush)
+		if (!e->model || e->model->needload || e->model->type != mod_brush)
 			continue;
 
 		if (R_CullModelForEntity(e))

@@ -193,7 +193,10 @@ QuakeSpasm-Spiked
 
   o  Special fields that can be used on any entity without QC changes:
      "emiteffect" field - to specify a constantly emitting effect.
-	 "traileffect" field - for particles any time the entity moves.
+     "traileffect" field - for particles any time the entity moves.
+
+  o  Optional HDR lighting (via LIGHTING_E5BGR9 bspx lump), allowing for much 
+     greater overbrights without stacking styles (to compensate for overly dark textures).
 
   --------
   4.  Todo

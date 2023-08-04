@@ -972,6 +972,26 @@ void MSG_WriteFloat (sizebuf_t *sb, float f)
 	SZ_Write (sb, &dat.l, 4);
 }
 
+void MSG_WriteDouble (sizebuf_t *sb, double f)
+{
+	union
+	{
+		double	f;
+		int64_t	l;
+	} dat;
+	byte *o = SZ_GetSpace (sb, sizeof(f));
+	dat.f = f;
+
+	o[0] = dat.l>>0;
+	o[1] = dat.l>>8;
+	o[2] = dat.l>>16;
+	o[3] = dat.l>>24;
+	o[4] = dat.l>>32;
+	o[5] = dat.l>>40;
+	o[6] = dat.l>>48;
+	o[7] = dat.l>>56;
+}
+
 void MSG_WriteString (sizebuf_t *sb, const char *s)
 {
 	if (!s)
@@ -1168,6 +1188,26 @@ float MSG_ReadFloat (void)
 	msg_readcount += 4;
 
 	dat.l = LittleLong (dat.l);
+
+	return dat.f;
+}
+float MSG_ReadDouble (void)
+{
+	union
+	{
+		double	f;
+		uint64_t	l;
+	} dat;
+
+	dat.l = ((uint64_t)net_message.data[msg_readcount  ]<<0 )	|
+			((uint64_t)net_message.data[msg_readcount+1]<<8 )	|
+			((uint64_t)net_message.data[msg_readcount+2]<<16)	|
+			((uint64_t)net_message.data[msg_readcount+3]<<24)	|
+			((uint64_t)net_message.data[msg_readcount+4]<<32)	|
+			((uint64_t)net_message.data[msg_readcount+5]<<40)	|
+			((uint64_t)net_message.data[msg_readcount+6]<<48)	|
+			((uint64_t)net_message.data[msg_readcount+7]<<56)	;
+	msg_readcount += 8;
 
 	return dat.f;
 }
@@ -1784,9 +1824,9 @@ static void COM_SetupNullState(void)
 	nullentitystate.colormod[0] = 32;
 	nullentitystate.colormod[1] = 32;
 	nullentitystate.colormod[2] = 32;
-//	nullentitystate.glowmod[0] = 32;
-//	nullentitystate.glowmod[1] = 32;
-//	nullentitystate.glowmod[2] = 32;
+	nullentitystate.glowmod[0] = 32;
+	nullentitystate.glowmod[1] = 32;
+	nullentitystate.glowmod[2] = 32;
 	nullentitystate.alpha = ENTALPHA_DEFAULT;	//fte has 255 by default, with 0 for invisible. fitz uses 1 for invisible, 0 default, and 255=full alpha
 	nullentitystate.scale = ENTSCALE_DEFAULT;
 	nullentitystate.solidsize = ES_SOLID_NOT;
@@ -2021,7 +2061,7 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 	searchpath_t	*search;
 	char		netpath[MAX_OSPATH];
 	pack_t		*pak;
-	int		i, findtime;
+	int		i;
 	const char *ext;
 
 	if (file && handle)
@@ -2055,8 +2095,14 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 						if (f)
 						{
 							fseek (f, pak->files[i].filepos, SEEK_SET);
-							f = FSZIP_Deflate(f, pak->files[i].deflatedsize, pak->files[i].filelen);
-							*handle = Sys_FileOpenStdio(f);
+							f = FSZIP_Deflate(f, pak->files[i].deflatedsize, pak->files[i].filelen, pak->files[i].name);
+							if (f)
+								*handle = Sys_FileOpenStdio(f);
+							else
+							{	//error!
+								com_filesize = -1;
+								*handle = -1;
+							}
 						}
 						else
 						{	//error!
@@ -2078,7 +2124,7 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 					{
 						fseek (*file, pak->files[i].filepos, SEEK_SET);
 						if (pak->files[i].deflatedsize)
-							*file = FSZIP_Deflate(*file, pak->files[i].deflatedsize, pak->files[i].filelen);
+							*file = FSZIP_Deflate(*file, pak->files[i].deflatedsize, pak->files[i].filelen, pak->files[i].name);
 					}
 					return com_filesize;
 				}
@@ -2099,8 +2145,7 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 			}
 
 			q_snprintf (netpath, sizeof(netpath), "%s/%s",search->filename, filename);
-			findtime = Sys_FileTime (netpath);
-			if (findtime == -1)
+			if (! (Sys_FileType(netpath) & FS_ENT_FILE))
 				continue;
 
 			if (path_id)
@@ -2328,7 +2373,7 @@ byte *COM_LoadMallocFile_TextMode_OSPath (const char *path, long *len_out)
 	FILE	*f;
 	byte	*data;
 	long	len, actuallen;
-	
+
 	// ericw -- this is used by Host_Loadgame_f. Translate CRLF to LF on load games,
 	// othewise multiline messages have a garbage character at the end of each line.
 	// TODO: could handle in a way that allows loading CRLF savegames on mac/linux
@@ -2336,26 +2381,34 @@ byte *COM_LoadMallocFile_TextMode_OSPath (const char *path, long *len_out)
 	f = fopen (path, "rt");
 	if (f == NULL)
 		return NULL;
-	
+
 	len = COM_filelength (f);
 	if (len < 0)
+	{
+		fclose (f);
 		return NULL;
-	
+	}
+
 	data = (byte *) malloc (len + 1);
 	if (data == NULL)
+	{
+		fclose (f);
 		return NULL;
+	}
 
 	// (actuallen < len) if CRLF to LF translation was performed
 	actuallen = fread (data, 1, len, f);
 	if (ferror(f))
 	{
+		fclose (f);
 		free (data);
 		return NULL;
 	}
 	data[actuallen] = '\0';
-	
+
 	if (len_out != NULL)
 		*len_out = actuallen;
+	fclose (f);
 	return data;
 }
 
@@ -3521,7 +3574,7 @@ void LOC_LoadFile (const char *file)
 	cursor = localization.text;
 
 	// skip BOM
-	if ((unsigned char)(cursor[0]) == 0xEF && (unsigned char)(cursor[1]) == 0xBB && cursor[2] == 0xB)
+	if ((unsigned char)(cursor[0]) == 0xEF && (unsigned char)(cursor[1]) == 0xBB && (unsigned char)(cursor[2]) == 0xBF)
 		cursor += 3;
 
 	lineno = 0;

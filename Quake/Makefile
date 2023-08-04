@@ -13,6 +13,9 @@ USE_SDL2=1
 ### Enable the use of zlib, for compressed pk3s.
 USE_ZLIB=1
 
+### Do we need to link the math library?
+LINK_M=1
+
 ### Enable/Disable codecs for streaming music support
 USE_CODEC_WAVE=1
 USE_CODEC_FLAC=0
@@ -116,6 +119,8 @@ SDL_LIBS   := $(shell $(SDL_CONFIG) --libs)
 
 ifeq ($(HOST_OS),sunos)
 NET_LIBS   :=-lsocket -lnsl -lresolv
+else ifdef HAIKU_OS
+NET_LIBS   :=-lnetwork
 else
 NET_LIBS   :=
 endif
@@ -188,11 +193,15 @@ ifeq ($(USE_CODEC_UMX),1)
 CFLAGS+= -DUSE_CODEC_UMX
 endif
 
-COMMON_LIBS:= -ldl -lm -lGL
+COMMON_LIBS:= -lGL
 
 ifeq ($(USE_ZLIB),1)
 CFLAGS+= -DUSE_ZLIB
 COMMON_LIBS+= -lz
+endif
+
+ifeq ($(LINK_M),1)
+COMMON_LIBS += -lm
 endif
 
 LIBS := $(COMMON_LIBS) $(NET_LIBS) $(CODECLIBS)
@@ -281,6 +290,8 @@ OBJS := strlcat.o \
 	pr_ext.o \
 	pr_edict.o \
 	pr_exec.o \
+	pmove.o \
+	pmovetst.o \
 	sv_main.o \
 	sv_move.o \
 	sv_phys.o \

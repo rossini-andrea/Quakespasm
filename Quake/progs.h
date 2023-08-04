@@ -32,8 +32,12 @@ typedef union eval_s
 	float		_float;
 	float		vector[3];
 	func_t		function;
-	int		_int;
-	int		edict;
+	int32_t		_int;
+	uint32_t	_uint32;
+	qcsint64_t	_sint64;
+	qcuint64_t	_uint64;
+	qcdouble_t	_double;
+	int			edict;
 } eval_t;
 
 #define	MAX_ENT_LEAFS	32
@@ -123,6 +127,10 @@ int NUM_FOR_EDICT(edict_t*);
 
 #define	G_FLOAT(o)		(qcvm->globals[o])
 #define	G_INT(o)		(*(int *)&qcvm->globals[o])
+#define	G_UINT(o)		(*(unsigned int *)&qcvm->globals[o])
+#define	G_INT64(o)		(*(qcsint64_t *)&qcvm->globals[o])
+#define	G_UINT64(o)		(*(qcuint64_t *)&qcvm->globals[o])
+#define	G_DOUBLE(o)		(*(qcdouble_t *)&qcvm->globals[o])
 #define	G_EDICT(o)		((edict_t *)((byte *)qcvm->edicts+ *(int *)&qcvm->globals[o]))
 #define G_EDICTNUM(o)		NUM_FOR_EDICT(G_EDICT(o))
 #define	G_VECTOR(o)		(&qcvm->globals[o])
@@ -185,6 +193,7 @@ struct pr_extfuncs_s
 	QCEXTFUNC(CSQC_Parse_Event,			"void()")															\
 	QCEXTFUNC(CSQC_Parse_Damage,		"float(float save, float take, vector dir)")						\
 	QCEXTFUNC(CSQC_UpdateView,			"void(float vwidth, float vheight, float notmenu)")					/*full only: for the full csqc-draws-entire-screen interface*/	\
+	QCEXTFUNC(CSQC_UpdateViewLoading,	"void(float vwidth, float vheight, float notmenu)")					/*full only: for the full csqc-draws-entire-screen interface*/	\
 	QCEXTFUNC(CSQC_Input_Frame,			"void()")															/*full only: input angles stuff.*/	\
 	QCEXTFUNC(CSQC_Parse_CenterPrint,	"float(string msg)")												\
 	QCEXTFUNC(CSQC_Parse_Print,			"void(string printmsg, float printlvl)")							\
@@ -219,7 +228,9 @@ struct pr_extglobals_s
 	QCEXTGLOBAL_FLOAT(time)\
 	QCEXTGLOBAL_FLOAT(frametime)\
 	//end
-#define QCEXTGLOBALS_GAME \
+#define QCEXTGLOBALS_INPUTS \
+	QCEXTGLOBAL_FLOAT(input_sequence)\
+	QCEXTGLOBAL_FLOAT(input_servertime)\
 	QCEXTGLOBAL_FLOAT(input_timelength)\
 	QCEXTGLOBAL_VECTOR(input_movevalues)\
 	QCEXTGLOBAL_VECTOR(input_angles)\
@@ -230,6 +241,9 @@ struct pr_extglobals_s
 	QCEXTGLOBAL_VECTOR(input_cursor_trace_start)\
 	QCEXTGLOBAL_VECTOR(input_cursor_trace_endpos)\
 	QCEXTGLOBAL_FLOAT(input_cursor_entitynumber)\
+	//end
+#define QCEXTGLOBALS_GAME \
+	QCEXTGLOBALS_INPUTS	\
 	QCEXTGLOBAL_FLOAT(physics_mode)\
 	//end
 #define QCEXTGLOBALS_CSQC \
@@ -275,6 +289,7 @@ struct pr_extfields_s
 	/*stuff used by csqc+ssqc, but not menu*/	\
 	QCEXTFIELD(customphysics,			".void()")/*function*/	\
 	QCEXTFIELD(gravity,					".float")			/*float*/	\
+	QCEXTFIELD(pmove_flags,				".float")			/*float, mostly to hold jump_held*/	\
 	//end of list
 #define QCEXTFIELDS_CL	\
 	QCEXTFIELD(frame2,					".float")				/*for csqc's addentity builtin.*/	\
@@ -295,6 +310,9 @@ struct pr_extfields_s
 	QCEXTFIELD(movement,				".vector")			/*vector*/	\
 	QCEXTFIELD(viewmodelforclient,		".entity")	/*entity*/	\
 	QCEXTFIELD(exteriormodeltoclient,	".entity")	/*entity*/	\
+	QCEXTFIELD(nodrawtoclient,			".entity")				\
+	QCEXTFIELD(drawonlytoclient,		".entity")				\
+	QCEXTFIELD(customizeentityforclient,".float()")				\
 	QCEXTFIELD(traileffectnum,			".float")		/*float*/	\
 	QCEXTFIELD(emiteffectnum,			".float")		/*float*/	\
 	QCEXTFIELD(button3,					".float")			/*float*/	\
@@ -375,9 +393,11 @@ struct qcvm_s
 	void *cursorhandle;	//video code.
 	qboolean nogameaccess;	//simplecsqc isn't allowed to poke properties of the actual game (to prevent cheats when there's no restrictions on what it can access)
 	qboolean brokenbouncemissile;	//2021 rerelease redefined it, breaking any mod that depends on it.
-	qboolean brokenpushrotate;		//2021 rerelease fucks over avelocity on movetype_push.
+	qboolean rotatingbmodel;		//2021 rerelease fucks over avelocity on movetype_push. broken by lots of other defective maps too.
 	qboolean brokeneffects;			//2021 rerelease redefined EF_RED and EF_BLUE.
 	qboolean precacheanytime; //mod queried for support. this is used to spam warnings to anyone that doesn't bother checking for it first. this annoyance is to reduce compat issues.
+
+	qboolean warned_rotatingbmodel;		//to enable warnings if the map looks like it this extension should have been enabled.
 
 	//was static inside pr_edict
 	char		*strings;
@@ -408,12 +428,24 @@ struct qcvm_s
 	int			reserved_edicts;
 	int			max_edicts;
 	edict_t		*edicts;			// can NOT be array indexed, because edict_t is variable sized, but can be used to reference the world ent
+	qboolean	worldlocked;
 	struct qmodel_s	*worldmodel;
 	struct qmodel_s	*(*GetModel)(int modelindex);	//returns the model for the given index, or null.
 
 	//originally from world.c
 	areanode_t	areanodes[AREA_NODES];
 	int			numareanodes;
+
+
+#define QCEXTGLOBAL_FLOAT(n)	float fallback_##n;
+#define QCEXTGLOBAL_VECTOR(n)	vec3_t fallback_##n;
+#define QCEXTGLOBAL_INT(n)		int fallback_##n;
+#define QCEXTGLOBAL_UINT64(n)	uint64_t fallback_##n;
+	QCEXTGLOBALS_INPUTS
+#undef QCEXTGLOBAL_FLOAT
+#undef QCEXTGLOBAL_VECTOR
+#undef QCEXTGLOBAL_INT
+#undef QCEXTGLOBAL_UINT64
 };
 extern globalvars_t	*pr_global_struct;
 
@@ -425,6 +457,8 @@ extern qcvm_t ssqcvm;
 extern qcvm_t *qcvm;
 void PR_SwitchQCVM(qcvm_t *nvm);
 #endif
+
+void PR_GetSetInputs(usercmd_t *cmd, qboolean set);
 
 extern const builtin_t pr_ssqcbuiltins[];
 extern const int pr_ssqcnumbuiltins;

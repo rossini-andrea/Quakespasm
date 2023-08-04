@@ -29,7 +29,7 @@ typedef struct
 	float	dist;
 } plane_t;
 
-typedef struct
+typedef struct trace_s
 {
 	qboolean	allsolid;	// if true, plane is not valid
 	qboolean	startsolid;	// if true, the initial point was in a solid area
@@ -40,6 +40,7 @@ typedef struct
 	edict_t	*ent;			// entity the surface is on
 
 	int		contents;		// spike -- the content type(s) that we found.
+	int		entnum;			// pmove prefers numbers not pointers.
 } trace_t;
 
 

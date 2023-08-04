@@ -517,7 +517,6 @@ qboolean Draw_ReloadTextures(qboolean force)
 	{
 		TexMgr_NewGame ();
 		Draw_NewGame ();
-		R_NewGame ();
 
 
 		Cache_Flush ();
@@ -708,8 +707,8 @@ Only used for the player color selection menu
 */
 void Draw_TransPicTranslate (int x, int y, qpic_t *pic, plcolour_t top, plcolour_t bottom)
 {
-	static plcolour_t oldtop = {-2};
-	static plcolour_t oldbottom = {-2};
+	static plcolour_t oldtop = {{-2}};
+	static plcolour_t oldbottom = {{-2}};
 
 	if (!CL_PLColours_Equals(top, oldtop) || !CL_PLColours_Equals(bottom, oldbottom))
 	{

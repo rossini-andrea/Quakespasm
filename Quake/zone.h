@@ -89,6 +89,10 @@ Zone block
 
 */
 
+#ifdef __linux__
+//#include <valgrind/memcheck.h>
+#endif
+
 void Memory_Init (void *buf, int size);
 
 void Z_Free (void *ptr);

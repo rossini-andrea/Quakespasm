@@ -167,6 +167,7 @@ void MSG_WriteLong (sizebuf_t *sb, int c);
 void MSG_WriteUInt64 (sizebuf_t *sb, unsigned long long c);
 void MSG_WriteInt64 (sizebuf_t *sb, long long c);
 void MSG_WriteFloat (sizebuf_t *sb, float f);
+void MSG_WriteDouble (sizebuf_t *sb, double f);
 void MSG_WriteStringUnterminated (sizebuf_t *sb, const char *s);
 void MSG_WriteString (sizebuf_t *sb, const char *s);
 void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags);
@@ -187,6 +188,7 @@ int MSG_ReadLong (void);
 unsigned long long MSG_ReadUInt64 (void);
 long long MSG_ReadInt64 (void);
 float MSG_ReadFloat (void);
+float MSG_ReadDouble (void);
 const char *MSG_ReadString (void);
 
 float MSG_ReadCoord (unsigned int flags);
@@ -350,7 +352,7 @@ const char *COM_GetGameNames(qboolean full);
 qboolean COM_GameDirMatches(const char *tdirs);
 
 pack_t *FSZIP_LoadArchive (const char *packfile);
-FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize);
+FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize, const char *entryname);
 
 void COM_WriteFile (const char *filename, const void *data, int len);
 int COM_OpenFile (const char *filename, int *handle, unsigned int *path_id);
@@ -395,6 +397,11 @@ const char *COM_ParseFloatNewline(const char *buffer, float *value);
 // Parse a string of non-whitespace into com_token, then tries to consume a
 // newline. Returns advanced buffer position.
 const char *COM_ParseStringNewline(const char *buffer);
+
+
+#define	FS_ENT_NONE		(0)
+#define	FS_ENT_FILE		(1 << 0)
+#define	FS_ENT_DIRECTORY	(1 << 1)
 
 /* The following FS_*() stdio replacements are necessary if one is
  * to perform non-sequential reads on files reopened on pak files

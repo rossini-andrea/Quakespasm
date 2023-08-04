@@ -262,6 +262,139 @@ void SV_UnlinkEdict (edict_t *ent)
 	ent->area.prev = ent->area.next = NULL;
 }
 
+#include "pmove.h"
+static void
+World_AreaAddEntsToPmove ( edict_t *ignore, areanode_t *node, vec3_t boxminmax[2] )
+{
+	link_t		*l, *next;
+	edict_t		*other;
+
+// touch linked edicts
+	for (l = node->solid_edicts.next ; l != &node->solid_edicts ; l = next)
+	{
+		next = l->next;
+		other = EDICT_FROM_AREA(l);
+		if (other == ignore)
+			continue;
+		if (other->v.solid != SOLID_BBOX && other->v.solid != SOLID_SLIDEBOX && other->v.solid != SOLID_BSP)
+			continue;
+		if (boxminmax[0][0] > other->v.absmax[0]
+		|| boxminmax[0][1] > other->v.absmax[1]
+		|| boxminmax[0][2] > other->v.absmax[2]
+		|| boxminmax[1][0] < other->v.absmin[0]
+		|| boxminmax[1][1] < other->v.absmin[1]
+		|| boxminmax[1][2] < other->v.absmin[2] )
+			continue;
+
+		if (ignore)
+		{
+			if (PROG_TO_EDICT(other->v.owner) == ignore)
+				continue;	// don't clip against own missiles
+			if (PROG_TO_EDICT(ignore->v.owner) == other)
+				continue;	// don't clip against owner
+		}
+
+		if (pmove.numphysent == countof(pmove.physents))
+			return; //too many... ooer.
+
+		pmove.physents[pmove.numphysent].info = NUM_FOR_EDICT(other);
+		pmove.physents[pmove.numphysent].model = (other->v.solid == SOLID_BSP)?qcvm->GetModel(other->v.modelindex):NULL;
+		VectorCopy(other->v.origin, pmove.physents[pmove.numphysent].origin);
+		VectorCopy(other->v.mins, pmove.physents[pmove.numphysent].mins);
+		VectorCopy(other->v.maxs, pmove.physents[pmove.numphysent].maxs);
+		VectorCopy(other->v.angles, pmove.physents[pmove.numphysent].angles);
+
+		pmove.physents[pmove.numphysent].forcecontentsmask = 0;
+		if (other->v.skin < 0)
+			switch((int)other->v.skin)
+			{
+			case CONTENTS_WATER:	pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_WATER; break;
+			case CONTENTS_LAVA:		pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_LAVA; break;
+			case CONTENTS_SLIME:	pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_SLIME; break;
+			case CONTENTS_SKY:		pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_SKY; break;
+			case CONTENTS_CLIP:		pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_CLIP; break;
+			case CONTENTS_LADDER:	pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_LADDER; break;
+			}
+
+		pmove.numphysent++;
+	}
+
+// recurse down both sides
+	if (node->axis == -1)
+		return;
+
+	if ( boxminmax[1][node->axis] > node->dist )
+		World_AreaAddEntsToPmove ( ignore, node->children[0], boxminmax );
+	if ( boxminmax[0][node->axis] < node->dist )
+		World_AreaAddEntsToPmove ( ignore, node->children[1], boxminmax );
+}
+void World_AddEntsToPmove(edict_t *ignore, vec3_t boxminmax[2])
+{
+	if (ignore)
+		pmove.skipent = NUM_FOR_EDICT(ignore);
+	pmove.physents[0].model = qcvm->worldmodel;
+	VectorClear(pmove.physents[0].origin);
+	VectorClear(pmove.physents[0].angles);
+	pmove.physents[0].forcecontentsmask = 0;
+	pmove.physents[0].info = 0;
+	pmove.numphysent = 1;
+	World_AreaAddEntsToPmove (ignore, qcvm->areanodes, boxminmax);
+
+	//csqc needs to be able to clip against the server's ents, too
+	if (qcvm == &cl.qcvm)
+	{
+		entity_t	*touch;
+		int i;
+
+		for (i=1,touch=cl.entities+1 ; i<cl.num_entities ; i++,touch++)
+		{
+			if (!touch->model)
+				continue;
+			if (touch->netstate.solidsize == ES_SOLID_NOT)
+				continue;	//not relevant
+
+			if (pmove.numphysent == countof(pmove.physents))
+				return; //too many... ooer.
+
+			if (touch->netstate.solidsize == ES_SOLID_BSP)
+			{
+				if (!touch->model || touch->model->type != mod_brush)
+					continue;
+				VectorCopy(touch->model->mins, pmove.physents[pmove.numphysent].mins);
+				VectorCopy(touch->model->maxs, pmove.physents[pmove.numphysent].maxs);
+				pmove.physents[pmove.numphysent].model = touch->model;
+			}
+			else
+			{
+				float *touch_mins = pmove.physents[pmove.numphysent].mins;
+				float *touch_maxs = pmove.physents[pmove.numphysent].maxs;
+				touch_maxs[0] = touch_maxs[1] = touch->netstate.solidsize & 255;
+				touch_mins[0] = touch_mins[1] = -touch_maxs[0];
+				touch_mins[2] = -(int)((touch->netstate.solidsize >> 8) & 255);
+				touch_maxs[2] = (int)((touch->netstate.solidsize>>16) & 65535) - 32768;
+				pmove.physents[pmove.numphysent].model = NULL;
+			}
+
+			pmove.physents[pmove.numphysent].info = -i;	//kinda backwards, but oh well. the csqc won't know their numbers.
+			VectorCopy(touch->origin, pmove.physents[pmove.numphysent].origin);
+			VectorCopy(touch->angles, pmove.physents[pmove.numphysent].angles);
+
+			pmove.physents[pmove.numphysent].forcecontentsmask = 0;
+			if (touch->skinnum < 0)
+				switch(touch->skinnum)
+				{
+				case CONTENTS_WATER:	pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_WATER; break;
+				case CONTENTS_LAVA:		pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_LAVA; break;
+				case CONTENTS_SLIME:	pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_SLIME; break;
+				case CONTENTS_SKY:		pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_SKY; break;
+				case CONTENTS_CLIP:		pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_CLIP; break;
+				case CONTENTS_LADDER:	pmove.physents[pmove.numphysent].forcecontentsmask = CONTENTBIT_LADDER; break;
+				}
+
+			pmove.numphysent++;
+		}
+	}
+}
 
 /*
 ====================
@@ -439,29 +572,34 @@ void SV_LinkEdict (edict_t *ent, qboolean touch_triggers)
 		return;
 
 // set the abs box
-	if ((ent->v.solid == SOLID_BSP||ent->v.solid == SOLID_EXT_BSPTRIGGER) && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]) && !qcvm->brokenpushrotate)
-	{	// expand for rotation the lame way. hopefully there's an origin brush in there.
-		int i;
-		float v1,v2;
-		vec3_t max;
-		//q2 method
-		for (i=0 ; i<3 ; i++)
-		{
-			v1 = fabs(ent->v.mins[i]);
-			v2 = fabs(ent->v.maxs[i]);
-			max[i] = q_max(v1,v2);
-		}
-		v1 = sqrt(DotProduct(max,max));
-		for (i=0 ; i<3 ; i++)
-		{
-			ent->v.absmin[i] = ent->v.origin[i] - v1;
-			ent->v.absmax[i] = ent->v.origin[i] + v1;
-		}
-	}
-	else
+	VectorAdd (ent->v.origin, ent->v.mins, ent->v.absmin);
+	VectorAdd (ent->v.origin, ent->v.maxs, ent->v.absmax);
+	if ((ent->v.solid == SOLID_BSP||ent->v.solid == SOLID_EXT_BSPTRIGGER) && (ent->v.angles[0] || ent->v.angles[1] || ent->v.angles[2]))
 	{
-		VectorAdd (ent->v.origin, ent->v.mins, ent->v.absmin);
-		VectorAdd (ent->v.origin, ent->v.maxs, ent->v.absmax);
+		if (qcvm->rotatingbmodel)
+		{	// expand for rotation the lame way. hopefully there's an origin brush in there.
+			int i;
+			float v1,v2;
+			vec3_t max;
+			//q2 method
+			for (i=0 ; i<3 ; i++)
+			{
+				v1 = fabs(ent->v.mins[i]);
+				v2 = fabs(ent->v.maxs[i]);
+				max[i] = q_max(v1,v2);
+			}
+			v1 = sqrt(DotProduct(max,max));
+			for (i=0 ; i<3 ; i++)
+			{
+				ent->v.absmin[i] = ent->v.origin[i] - v1;
+				ent->v.absmax[i] = ent->v.origin[i] + v1;
+			}
+		}
+		else if (!qcvm->warned_rotatingbmodel)
+		{
+			Con_Warning("%s(\"%s\") has angles set, but DP_SV_ROTATINGBMODEL is not enabled\n", (ent->v.solid == SOLID_EXT_BSPTRIGGER)?"SOLID_BSPTRIGGER":"SOLID_BSP", PR_GetString(ent->v.classname));
+			qcvm->warned_rotatingbmodel = true;
+		}
 	}
 
 //
@@ -971,27 +1109,39 @@ trace_t SV_ClipMoveToEntity (edict_t *ent, vec3_t start, vec3_t mins, vec3_t max
 	VectorSubtract (end, offset, end_l);
 
 // trace a line through the apropriate clipping hull
-	if ((ent->v.solid == SOLID_BSP || ent->v.solid == SOLID_EXT_BSPTRIGGER) && (ent->v.angles[0]||ent->v.angles[1]||ent->v.angles[2]) && !qcvm->brokenpushrotate && qcvm->edicts != ent)	//don't rotate the world entity's collisions (its not networked, and some maps are buggy, resulting in screwed collisions)
+	if ((ent->v.solid == SOLID_BSP || ent->v.solid == SOLID_EXT_BSPTRIGGER) && (ent->v.angles[0]||ent->v.angles[1]||ent->v.angles[2]) && qcvm->edicts != ent)	//don't rotate the world entity's collisions (its not networked, and some maps are buggy, resulting in screwed collisions)
 	{
+		if (qcvm->rotatingbmodel)
+		{
 #define DotProductTranspose(v,m,a) ((v)[0]*(m)[0][a] + (v)[1]*(m)[1][a] + (v)[2]*(m)[2][a])
-		vec3_t axis[3], start_r, end_r, tmp;
-		AngleVectors(ent->v.angles, axis[0], axis[1], axis[2]);
-		VectorInverse(axis[1]);
-		start_r[0] = DotProduct(start_l, axis[0]);
-		start_r[1] = DotProduct(start_l, axis[1]);
-		start_r[2] = DotProduct(start_l, axis[2]);
-		end_r[0] = DotProduct(end_l, axis[0]);
-		end_r[1] = DotProduct(end_l, axis[1]);
-		end_r[2] = DotProduct(end_l, axis[2]);
-		SV_RecursiveHullCheck (hull, start_r, end_r, &trace, hitcontents);
-		VectorCopy(trace.endpos, tmp);
-		trace.endpos[0] = DotProductTranspose(tmp,axis,0);
-		trace.endpos[1] = DotProductTranspose(tmp,axis,1);
-		trace.endpos[2] = DotProductTranspose(tmp,axis,2);
-		VectorCopy(trace.plane.normal, tmp);
-		trace.plane.normal[0] = DotProductTranspose(tmp,axis,0);
-		trace.plane.normal[1] = DotProductTranspose(tmp,axis,1);
-		trace.plane.normal[2] = DotProductTranspose(tmp,axis,2);
+			vec3_t axis[3], start_r, end_r, tmp;
+			AngleVectors(ent->v.angles, axis[0], axis[1], axis[2]);
+			VectorInverse(axis[1]);
+			start_r[0] = DotProduct(start_l, axis[0]);
+			start_r[1] = DotProduct(start_l, axis[1]);
+			start_r[2] = DotProduct(start_l, axis[2]);
+			end_r[0] = DotProduct(end_l, axis[0]);
+			end_r[1] = DotProduct(end_l, axis[1]);
+			end_r[2] = DotProduct(end_l, axis[2]);
+			SV_RecursiveHullCheck (hull, start_r, end_r, &trace, hitcontents);
+			VectorCopy(trace.endpos, tmp);
+			trace.endpos[0] = DotProductTranspose(tmp,axis,0);
+			trace.endpos[1] = DotProductTranspose(tmp,axis,1);
+			trace.endpos[2] = DotProductTranspose(tmp,axis,2);
+			VectorCopy(trace.plane.normal, tmp);
+			trace.plane.normal[0] = DotProductTranspose(tmp,axis,0);
+			trace.plane.normal[1] = DotProductTranspose(tmp,axis,1);
+			trace.plane.normal[2] = DotProductTranspose(tmp,axis,2);
+		}
+		else
+		{
+			if (!qcvm->warned_rotatingbmodel)
+			{
+				Con_Warning("%s(\"%s\") has angles set, but DP_SV_ROTATINGBMODEL is not enabled\n", (ent->v.solid == SOLID_EXT_BSPTRIGGER)?"SOLID_BSPTRIGGER":"SOLID_BSP", PR_GetString(ent->v.classname));
+				qcvm->warned_rotatingbmodel = true;
+			}
+			SV_RecursiveHullCheck (hull, start_l, end_l, &trace, hitcontents);
+		}
 	}
 	else
 		SV_RecursiveHullCheck (hull, start_l, end_l, &trace, hitcontents);
@@ -1191,8 +1341,8 @@ static void World_ClipToNetwork ( moveclip_t *clip )
 
 					touch_maxs[0] = touch_maxs[1] = touch->netstate.solidsize & 255;
 					touch_mins[0] = touch_mins[1] = -touch_maxs[0];
-					touch_mins[2] = -((touch->netstate.solidsize >>8) & 255);
-					touch_maxs[2] = ((touch->netstate.solidsize>>16) & 65535) - 32768;
+					touch_mins[2] = -(int)((touch->netstate.solidsize >>8) & 255);
+					touch_maxs[2] = (int)((touch->netstate.solidsize>>16) & 65535) - 32768;
 
 					VectorSubtract (touch_mins, clip->maxs, hullmins);
 					VectorSubtract (touch_maxs, clip->mins, hullmaxs);
@@ -1206,7 +1356,7 @@ static void World_ClipToNetwork ( moveclip_t *clip )
 			VectorSubtract (clip->end, offset, end_l);
 
 		// trace a line through the apropriate clipping hull
-			if (touch->netstate.solidsize == ES_SOLID_BSP && (touch->angles[0]||touch->angles[1]||touch->angles[2]) && !qcvm->brokenpushrotate)	//don't rotate the world entity's collisions (its not networked, and some maps are buggy, resulting in screwed collisions)
+			if (touch->netstate.solidsize == ES_SOLID_BSP && (touch->angles[0]||touch->angles[1]||touch->angles[2]) && qcvm->rotatingbmodel)	//don't rotate the world entity's collisions (its not networked, and some maps are buggy, resulting in screwed collisions)
 			{
 		#define DotProductTranspose(v,m,a) ((v)[0]*(m)[0][a] + (v)[1]*(m)[1][a] + (v)[2]*(m)[2][a])
 				vec3_t axis[3], start_r, end_r, tmp;

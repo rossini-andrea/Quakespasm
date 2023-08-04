@@ -4,6 +4,11 @@ PROJECT(QSS)
 
 SET(QS_LIBS ${QS_LIBS} m ${CMAKE_DL_LIBS})
 
+#other people seem to still care about msvc.
+IF(CMAKE_C_COMPILER_ID MATCHES "GNU")
+	SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror=pointer-arith")	#block this gnuc extension
+ENDIF()
+
 FIND_PACKAGE(PkgConfig REQUIRED)
 
 #sdl2 stuff
@@ -175,6 +180,8 @@ ADD_EXECUTABLE(quakespasm
 #	Quake/net_wipx.c
 	Quake/pl_linux.c
 #	Quake/pl_win.c
+	Quake/pmove.c
+	Quake/pmovetst.c
 	Quake/pr_cmds.c
 	Quake/pr_edict.c
 	Quake/pr_exec.c

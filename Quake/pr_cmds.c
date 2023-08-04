@@ -684,7 +684,10 @@ static void PF_sound (void)
 
 	if (rate && rate != 1)
 		Con_DPrintf("sound() rate scaling is not supported\n");
-	if (flags)
+#define SUPPORTED_SERVER_CHANNEL_FLAGS (CF_FORCELOOP|CF_NOSPACIALISE|CF_NOREVERB|CF_FOLLOW|CF_NOREPLACE|CF_SENDVELOCITY|CF_UNICAST|CF_RELIABLE)
+#define SERVER_ONLY_CHANNEL_FLAGS (CF_UNICAST|CF_RELIABLE) //stuff that's purely serverside
+#define SUPPORTED_CLIENT_CHANNEL_FLAGS (0) //our client is poop. :(
+	if (flags & ~((SUPPORTED_CLIENT_CHANNEL_FLAGS|SERVER_ONLY_CHANNEL_FLAGS)&SUPPORTED_SERVER_CHANNEL_FLAGS))
 		Con_DPrintf("sound() flags %#x not supported\n", flags);
 	if (offset)
 		Con_DPrintf("sound() time offsets are not supported\n");
@@ -1709,7 +1712,7 @@ static void PF_sv_makestatic (void)
 		sv.max_statics = nm;
 	}
 	st = &sv.static_entities[sv.num_statics];
-	SV_BuildEntityState(ent, st);
+	SV_BuildEntityState(NULL, ent, st);
 	if (st->alpha == ENTALPHA_ZERO)
 		; //no point
 	else
@@ -1896,6 +1899,7 @@ static void PF_cl_sound (void)
 	int		volume;
 	float	attenuation;
 	int entnum;
+	vec3_t origin;
 
 	entity = G_EDICT(OFS_PARM0);
 	channel = G_FLOAT(OFS_PARM1);
@@ -1907,7 +1911,11 @@ static void PF_cl_sound (void)
 	//fullcsqc fixme: if (entity->v->entnum)  
 	entnum *= -1;
 
-	S_StartSound(entnum, channel, S_PrecacheSound(sample), entity->v.origin, volume, attenuation);
+	//fix up origin like the ssqc's would.
+	VectorAdd(entity->v.mins, entity->v.maxs, origin);
+	VectorMA(entity->v.origin, 0.5,origin, origin);
+
+	S_StartSound(entnum, channel, S_PrecacheSound(sample), origin, volume, attenuation);
 }
 static void PF_cl_ambientsound (void)
 {
@@ -2094,7 +2102,7 @@ static void PF_cl_makestatic (void)
 	stat = cl.static_entities[i];
 	cl.num_statics++;
 
-	SV_BuildEntityState(ent, &stat->baseline);
+	SV_BuildEntityState(NULL, ent, &stat->baseline);
 
 // copy it to the current state
 

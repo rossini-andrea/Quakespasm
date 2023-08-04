@@ -250,6 +250,8 @@ typedef void (APIENTRYP QS_PFNGLRENDERBUFFERSTORAGEPROC) (GLenum target, GLenum 
 typedef void (APIENTRYP QS_PFNGLFRAMEBUFFERRENDERBUFFERPROC) (GLenum target, GLenum attachment, GLenum renderbuffertarget, GLuint renderbuffer);
 typedef void (APIENTRYP QS_PFNGLDELETEFRAMEBUFFERSPROC) (GLsizei n, GLuint *framebuffers);
 typedef void (APIENTRYP QS_PFNGLDELETERENDERBUFFERSPROC) (GLsizei n, GLuint *renderbuffers);
+typedef void (APIENTRYP QS_PFNGENERATEMIPMAP) (GLenum type);
+
 extern QS_PFNGLCREATESHADERPROC GL_CreateShaderFunc;
 extern QS_PFNGLDELETESHADERPROC GL_DeleteShaderFunc;
 extern QS_PFNGLDELETEPROGRAMPROC GL_DeleteProgramFunc;
@@ -289,6 +291,9 @@ extern	qboolean	gl_glsl_gamma_able;
 extern	qboolean	gl_glsl_alias_able;
 extern	qboolean	gl_glsl_water_able;
 // ericw --
+
+//mipmapped warp textures
+extern QS_PFNGENERATEMIPMAP GL_GenerateMipmap;
 
 //ericw -- NPOT texture support
 extern	qboolean	gl_texture_NPOT;

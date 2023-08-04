@@ -744,7 +744,7 @@ pack_t *FSZIP_LoadArchive (const char *packfile)
 	return pack;
 }
 
-FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize)
+FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize, const char *entryname)
 {
 #ifdef USE_ZLIB
 	byte inbuffer[65536];
@@ -766,12 +766,14 @@ FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize)
 
 	if (!of)
 	{
+		Con_Printf("FSZIP_Deflate: tmpfile failed, out of handles?\n");
 		fclose(src);
 		return NULL;
 	}
 
 	memset(&strm, 0, sizeof(strm));
 	strm.data_type = Z_UNKNOWN;
+	strm.next_out = outbuffer;
 	inflateInit2(&strm, -MAX_WBITS);
 	while ((ret=inflate(&strm, Z_SYNC_FLUSH)) != Z_STREAM_END)
 	{
@@ -786,9 +788,8 @@ FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize)
 			}
 			if (strm.avail_out == 0)
 			{
+				fwrite(outbuffer, 1, strm.next_out - outbuffer, of);
 				strm.next_out = outbuffer;
-				fwrite(outbuffer, 1, strm.total_out, of);
-				strm.total_out = 0;
 				strm.avail_out = sizeof(outbuffer);
 			}
 			continue;
@@ -800,15 +801,20 @@ FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize)
 			inflateEnd(&strm);
 			fclose(src);
 			fclose(of);
-			Con_Printf("Couldn't decompress file\n");
+			Con_Printf("Couldn't decompress file \"%s\", corrupt?\n", entryname);
 			return NULL;
 		}
-		
 	}
 	fwrite(outbuffer, 1, strm.total_out, of);
 	inflateEnd(&strm);
-
 	fclose(src);
+
+	if (strm.total_out != outsize)
+	{
+		Con_Printf("%s: Decompressed %u bytes, expected %u\n", entryname, (unsigned int)strm.total_out, (unsigned int)outsize);
+		fclose(of);
+		return NULL;
+	}
 
 	fseek(of, SEEK_SET, 0);
 	return of;

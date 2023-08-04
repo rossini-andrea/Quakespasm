@@ -26,13 +26,17 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // draw.h -- these are the only functions outside the refresh allowed
 // to touch the vid buffer
 
-typedef struct
+typedef union
 {
-	byte type; //0 for none, 1 for legacy colours, 2 for rgb.
-	byte basic;
-	byte rgb[3];
+	struct{
+		byte type; //0 for none, 1 for legacy colours, 2 for rgb.
+		byte rgb[3];
+		byte basic; //used in legacy contexts where an rgb value will not work.
+	};
+	int key;	//for fast compares
 } plcolour_t;
 plcolour_t CL_PLColours_Parse(const char *s);
+plcolour_t CL_PLColours_FromLegacy(int val);
 char *CL_PLColours_ToString(plcolour_t c);
 byte *CL_PLColours_ToRGB(plcolour_t *c);
 #define CL_PLColours_Equals(a,b) (!memcmp(&a,&b, sizeof(plcolour_t)))

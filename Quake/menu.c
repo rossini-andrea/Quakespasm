@@ -662,9 +662,82 @@ static plcolour_t	setup_oldtop;
 static plcolour_t	setup_oldbottom;
 static plcolour_t	setup_top;
 static plcolour_t	setup_bottom;
+extern qboolean	keydown[];
+
+
+//http://axonflux.com/handy-rgb-to-hsl-and-rgb-to-hsv-color-model-c
+static void rgbtohsv(byte *rgb, vec3_t result)
+{	//helper for the setup menu
+	int r = rgb[0], g = rgb[1], b = rgb[2];
+	float maxc = q_max(r, q_max(g, b)), minc = q_min(r, q_min(g, b));
+    float h, s, l = (maxc + minc) / 2;
+
+	float d = maxc - minc;
+	if (maxc)
+		s = d / maxc;
+	else
+		s = 0;
+
+	if(maxc == minc)
+	{
+		h = 0; // achromatic
+	}
+	else
+	{
+		if (maxc == r)
+			h = (g - b) / d + ((g < b) ? 6 : 0);
+		else if (maxc == g)
+			h = (b - r) / d + 2;
+		else
+			h = (r - g) / d + 4;
+		h /= 6;
+    }
+
+	result[0] = h;
+	result[1] = s;
+	result[2] = l;
+};
+//http://axonflux.com/handy-rgb-to-hsl-and-rgb-to-hsv-color-model-c
+static void hsvtorgb(float inh, float s, float v, byte *out)
+{	//helper for the setup menu
+	int r, g, b;
+	float h = inh - (int)floor(inh);
+	int i = h * 6;
+	float f = h * 6 - i;
+	float p = v * (1 - s);
+	float q = v * (1 - f * s);
+	float t = v * (1 - (1 - f) * s);
+	switch(i)
+	{
+	default:
+	case 0: r = v*0xff, g = t*0xff, b = p*0xff; break;
+	case 1: r = q*0xff, g = v*0xff, b = p*0xff; break;
+	case 2: r = p*0xff, g = v*0xff, b = t*0xff; break;
+	case 3: r = p*0xff, g = q*0xff, b = v*0xff; break;
+	case 4: r = t*0xff, g = p*0xff, b = v*0xff; break;
+	case 5: r = v*0xff, g = p*0xff, b = q*0xff; break;
+	}
+
+	out[0] = r;
+	out[1] = g;
+	out[2] = b;
+};
 
 void M_AdjustColour(plcolour_t *tr, int dir)
 {
+	if (keydown[K_SHIFT])
+	{
+		vec3_t hsv;
+		rgbtohsv(CL_PLColours_ToRGB(tr), hsv);
+
+		hsv[0] += dir/128.0;
+		hsv[1] = 1;
+		hsv[2] = 1;	//make these consistent and not inherited from any legacy colours. we're persisting in rgb with small hue changes so we can't actually handle greys, so whack the saturation and brightness right up.
+		tr->type = 2;	//rgb...
+		tr->basic = 0;	//no longer relevant.
+		hsvtorgb(hsv[0], hsv[1], hsv[2], tr->rgb);
+	}
+	else
 	{
 		tr->type = 1;
 		if (tr->basic+dir < 0)
@@ -1640,6 +1713,7 @@ static enum extras_e
 	EXTRAS_QCEXTENSIONS,
 	EXTRAS_CLASSICPARTICLES,
 	EXTRAS_AUDIORATE,
+	EXTRAS_PREDICTION,
 	EXTRAS_ITEMS
 } extras_cursor;
 
@@ -1655,7 +1729,7 @@ void M_Menu_Extras_f (void)
 
 static void M_Extras_AdjustSliders (int dir)
 {
-	extern cvar_t pr_checkextension, r_replacemodels, gl_load24bit, cl_nopext, r_lerpmodels, r_lerpmove, host_maxfps, sys_throttle, r_particles;
+	extern cvar_t pr_checkextension, r_replacemodels, gl_load24bit, cl_nopext, r_lerpmodels, r_lerpmove, host_maxfps, sys_throttle, r_particles, sv_nqplayerphysics, cl_nopred;
 	int m;
 	S_LocalSound ("misc/menu3.wav");
 
@@ -1747,6 +1821,15 @@ static void M_Extras_AdjustSliders (int dir)
 		Cvar_SetValueQuick (&snd_mixspeed, (snd_mixspeed.value==48000)?44100:48000);
 		Cbuf_AddText("\nsnd_restart\n");
 		break;
+	case EXTRAS_PREDICTION:
+		m = ((!!cl_nopred.value)<<1)|(!!sv_nqplayerphysics.value);
+		m += dir;
+		if ((m&3)==2)
+			m += dir; //boo! don't like that combo. skip it
+		m &= 3;
+		Cvar_SetValueQuick (&cl_nopred, (m>>1)&1);
+		Cvar_SetValueQuick (&sv_nqplayerphysics, (m>>0)&1);
+		break;
 	case EXTRAS_ITEMS:	//not a real option
 		break;
 	}
@@ -1754,7 +1837,7 @@ static void M_Extras_AdjustSliders (int dir)
 
 void M_Extras_Draw (void)
 {
-	extern cvar_t pr_checkextension, r_replacemodels, gl_load24bit, cl_nopext, r_lerpmodels, r_lerpmove, host_maxfps, sys_throttle, r_particles;
+	extern cvar_t pr_checkextension, r_replacemodels, gl_load24bit, cl_nopext, r_lerpmodels, r_lerpmove, host_maxfps, sys_throttle, r_particles, sv_nqplayerphysics, cl_nopred;
 	int m;
 	qpic_t	*p;
 	enum extras_e i;
@@ -1797,9 +1880,12 @@ void M_Extras_Draw (void)
 			M_DrawCheckbox(220, y, !!r_lerpmodels.value && !!r_lerpmove.value);
 			break;
 		case EXTRAS_FPSCAP:
-			M_Print (16, y,	"           Maximum FPS");
+			if (host_maxfps.value < 0)
+				M_Print (16, y,	"           Maximum PPS");
+			else
+				M_Print (16, y,	"           Maximum FPS");
 			if (host_maxfps.value)
-				M_Print (220, y, va("%g", host_maxfps.value));
+				M_Print (220, y, va("%g", fabs(host_maxfps.value)));
 			else
 				M_Print (220, y, "uncapped");
 			break;
@@ -1855,6 +1941,18 @@ void M_Extras_Draw (void)
 				M_Print (220, y, "44100 hz (CD)");
 			else
 				M_Print (220, y, va("%i hz", (int)snd_mixspeed.value));
+			break;
+
+		case EXTRAS_PREDICTION:
+			M_Print (16, y,	"    Prediction/Physics");
+			if (!cl_nopred.value && !sv_nqplayerphysics.value)
+				M_Print (220, y, "on (override ssqc)");	//deathmatch! will break quirky mods like quakerally.
+			else if (!cl_nopred.value && sv_nqplayerphysics.value)
+				M_Print (220, y, "on (compatible physics)");	//conservative / default setting.
+			else if (cl_nopred.value && !sv_nqplayerphysics.value)
+				M_Print (220, y, "off (but override ssqc)"); //silly setting (skipped when changing in menu)
+			else
+				M_Print (220, y, "off");	//honest/oldskool setting.
 			break;
 
 		case EXTRAS_ITEMS:	//unreachable.

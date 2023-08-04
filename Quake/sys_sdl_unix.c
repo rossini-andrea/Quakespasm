@@ -27,13 +27,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <sys/types.h>
 #include <errno.h>
 #include <unistd.h>
-#ifdef PLATFORM_OSX
+#if defined(PLATFORM_OSX) || defined(PLATFORM_HAIKU)
 #include <libgen.h>	/* dirname() and basename() */
 #endif
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <fcntl.h>
-#include <time.h>
 #ifdef DO_USERDIRS
 #include <pwd.h>
 #endif
@@ -152,19 +151,22 @@ int Sys_FileWrite (int handle, const void *data, int count)
 	return fwrite (data, 1, count, sys_handles[handle]);
 }
 
-int Sys_FileTime (const char *path)
+int Sys_FileType (const char *path)
 {
-	FILE	*f;
+	/*
+	if (access(path, R_OK) == -1)
+		return 0;
+	*/
+	struct stat	st;
 
-	f = fopen(path, "rb");
+	if (stat(path, &st) != 0)
+		return FS_ENT_NONE;
+	if (S_ISDIR(st.st_mode))
+		return FS_ENT_DIRECTORY;
+	if (S_ISREG(st.st_mode))
+		return FS_ENT_FILE;
 
-	if (f)
-	{
-		fclose(f);
-		return 1;
-	}
-
-	return -1;
+	return FS_ENT_NONE;
 }
 
 
@@ -331,6 +333,21 @@ static void Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 {
 	char	*tmp;
 
+	#ifdef PLATFORM_HAIKU
+	if (realpath(argv0, dst) == NULL)
+	{
+		perror("realpath");
+		if (getcwd(dst, dstsize - 1) == NULL)
+	_fail:		Sys_Error ("Couldn't determine current directory");
+	}
+	else
+	{
+		/* strip off the binary name */
+		if (! (tmp = strdup (dst))) goto _fail;
+		q_strlcpy (dst, dirname(tmp), dstsize);
+		free (tmp);
+	}
+	#else
 	if (getcwd(dst, dstsize - 1) == NULL)
 		Sys_Error ("Couldn't determine current directory");
 
@@ -343,6 +360,7 @@ static void Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 		if (tmp != dst && *tmp == '/')
 			*tmp = 0;
 	}
+	#endif
 }
 #endif
 
