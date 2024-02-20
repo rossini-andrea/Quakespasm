@@ -1389,7 +1389,7 @@ void CL_Tracepos_f (void)
 		return;
 
 	VectorMA(r_refdef.vieworg, 8192.0, vpn, v);
-	TraceLine(r_refdef.vieworg, v, w);
+	TraceLine(r_refdef.vieworg, v, 0, w);
 
 	if (VectorLength(w) == 0)
 		Con_Printf ("Tracepos: trace didn't hit anything\n");

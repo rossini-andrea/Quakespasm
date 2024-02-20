@@ -287,6 +287,13 @@ typedef struct
 	int			lightofs;		// start of [numstyles*surfsize] samples
 } dlface_t;
 
+struct decoupled_lm_info_s
+{
+	unsigned short lmsize[2];	//made explicit. beware MAX_
+	unsigned int lmoffset;		//replacement offset for vanilla compat.
+	vec4_t lmvecs[2]; //lmcoord[] = dotproduct3(vertexcoord, lmvecs[])+lmvecs[][3]
+};
+
 #define	AMBIENT_WATER	0
 #define	AMBIENT_SKY		1
 #define	AMBIENT_SLIME	2

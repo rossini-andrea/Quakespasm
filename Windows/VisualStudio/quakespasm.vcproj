@@ -502,6 +502,14 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\Quake\pmove.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\Quake\pmovetst.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\Quake\pr_cmds.c"
 				>
 			</File>
@@ -829,6 +837,10 @@
 			</File>
 			<File
 				RelativePath="..\..\Quake\platform.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\Quake\pmove.h"
 				>
 			</File>
 			<File

@@ -985,11 +985,19 @@ void R_DrawTextureChains_GLSL (qmodel_t *model, entity_t *ent, texchain_t chain)
 	int		lastlightmap;
 	gltexture_t	*fullbright = NULL;
 	float		entalpha;
+	unsigned int enteffects;
 
 	entalpha = (ent != NULL) ? ENTALPHA_DECODE(ent->alpha) : 1.0f;
+	enteffects = (ent != NULL) ? ent->effects : 0;
 
 // enable blending / disable depth writes
-	if (entalpha < 1)
+	if (enteffects & EF_ADDITIVE)
+	{
+		glDepthMask (GL_FALSE);
+		glBlendFunc (GL_SRC_ALPHA, GL_ONE);
+		glEnable (GL_BLEND);
+	}
+	else if (entalpha < 1)
 	{
 		glDepthMask (GL_FALSE);
 		glEnable (GL_BLEND);
@@ -1078,7 +1086,13 @@ void R_DrawTextureChains_GLSL (qmodel_t *model, entity_t *ent, texchain_t chain)
 	GL_UseProgramFunc (0);
 	GL_SelectTexture (GL_TEXTURE0);
 
-	if (entalpha < 1)
+	if (enteffects & EF_ADDITIVE)
+	{
+		glDepthMask (GL_TRUE);
+		glBlendFunc (GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);	//our normal alpha setting.
+		glDisable (GL_BLEND);
+	}
+	else if (entalpha < 1)
 	{
 		glDepthMask (GL_TRUE);
 		glDisable (GL_BLEND);

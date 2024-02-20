@@ -41,7 +41,6 @@
 				Name="VCCLCompilerTool"
 				Optimization="0"
 				AdditionalIncludeDirectories="..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake;$(VC_IncludePath);$(WindowsSDK_IncludePath)"
-				AdditionalIncludeDirectories="..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_CRT_NONSTDC_NO_DEPRECATE;_CRT_SECURE_NO_WARNINGS;_WINSOCK_DEPRECATED_NO_WARNINGS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -507,6 +506,14 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\Quake\pmove.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\Quake\pmovetst.c"
+				>
+			</File>
+			<File
 				RelativePath="..\..\Quake\pr_cmds.c"
 				>
 			</File>
@@ -826,6 +833,10 @@
 			</File>
 			<File
 				RelativePath="..\..\Quake\platform.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\Quake\pmove.h"
 				>
 			</File>
 			<File

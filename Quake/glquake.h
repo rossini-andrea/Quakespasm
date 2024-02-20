@@ -154,6 +154,9 @@ extern	refdef_t	r_refdef;
 extern	mleaf_t		*r_viewleaf, *r_oldviewleaf;
 extern	int		d_lightstylevalue[MAX_LIGHTSTYLES];	// 8.8 fraction of base light value
 
+extern	cvar_t	gl_farclip;
+#define NEARCLIP 4
+
 extern	cvar_t	r_norefresh;
 extern	cvar_t	r_drawentities;
 extern	cvar_t	r_drawworld;

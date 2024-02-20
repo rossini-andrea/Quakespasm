@@ -471,7 +471,7 @@ float CL_TraceLine (vec3_t start, vec3_t end, vec3_t impact, vec3_t normal, int 
 extern	cvar_t	chase_active;
 
 void Chase_Init (void);
-void TraceLine (vec3_t start, vec3_t end, vec3_t impact);
+void TraceLine (vec3_t start, vec3_t end, float pushoff, vec3_t impact);
 void Chase_UpdateForClient (void);	//johnfitz
 void Chase_UpdateForDrawing (void);	//johnfitz
 

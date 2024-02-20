@@ -52,6 +52,7 @@ static int droppedDatagrams;
 //we additionally look for 'DarkPlaces-Quake' servers too, because we can, but most of those servers will be using dpp7 and will (safely) not respond to our ccreq_server_info requests.
 //we are not visible to DarkPlaces users - dp does not support fitz666 so that's not a viable option, at least by default, feel free to switch the order if you also change sv_protocol back to 15.
 cvar_t sv_reportheartbeats = {"sv_reportheartbeats", "0"};
+cvar_t sv_heartbeat_interval = {"sv_heartbeat_interval", "110"};
 cvar_t sv_public = {"sv_public", NULL};
 cvar_t com_protocolname = {"com_protocolname", "FTE-Quake DarkPlaces-Quake"};
 cvar_t password = {"password", ""};	//this is super-lame and limited to numbers, so when not numeric we hash it and use that instead. there's no nonces though.
@@ -81,7 +82,27 @@ static int myDriverLevel;
 
 extern qboolean m_return_onerror;
 extern char m_return_reason[32];
+
 static double heartbeat_time;	//when this is reached, send a heartbeat to all masters.
+static struct heartbeatctx_s {	//thread context used to avoid stalls on dns lookups.
+	qboolean working;	//don't really need a barrier, we'll use join to sync before reading the rest.
+	void *thread;
+
+	int nummasters;
+	struct
+	{
+		int okay;
+		char *name;
+	} master[countof(net_masters)];
+
+	size_t numresults;
+	struct
+	{
+		int ldrv;
+		char *name;
+		struct qsockaddr addr;
+	} result[countof(net_masters)*MAX_NET_DRIVERS];
+} *heartbeatctx;
 
 
 static char *StrAddr (struct qsockaddr *addr)
@@ -1151,6 +1172,12 @@ void Datagram_Listen (qboolean state)
 	qboolean islistening = false;
 
 	heartbeat_time = 0;	//reset it
+	if (heartbeatctx)
+	{	//clean up, might block oh well.
+		SDL_WaitThread(heartbeatctx->thread, NULL);
+		Z_Free(heartbeatctx);
+		heartbeatctx = NULL;
+	}
 
 	for (i = 0; i < net_numlandrivers; i++)
 	{
@@ -1622,42 +1649,85 @@ static void _Datagram_ServerControlPacket (sys_socket_t acceptsock, struct qsock
 	SV_ConnectClient (plnum);
 }
 
+static int DNSLookupThread(void *vctx)
+{
+	struct heartbeatctx_s *ctx = vctx;
+	size_t d, k;
+	for (k = 0; k < ctx->nummasters; k++)
+	{
+		ctx->master[k].okay = false;
+		for (d = 0; d < net_numlandrivers; d++)
+		{
+			if (net_landrivers[d].initialized && net_landrivers[d].listeningSock != INVALID_SOCKET)
+			{
+				if (net_landrivers[d].GetAddrFromName(ctx->master[k].name, &ctx->result[ctx->numresults].addr) >= 0)
+				{
+					ctx->result[ctx->numresults].ldrv = d;
+					ctx->result[ctx->numresults].name = ctx->master[k].name;
+					ctx->master[k].okay = true;
+					ctx->numresults++;
+				}
+			}
+		}
+	}
+
+	ctx->working = false;
+	return true;
+}
+
 qsocket_t *Datagram_CheckNewConnections (void)
 {
+	struct heartbeatctx_s *ctx = heartbeatctx;
 	//only needs to do master stuff now
 	if (sv_public.value > 0)
 	{
-		if (Sys_DoubleTime() > heartbeat_time)
+		if (ctx)
+		{
+			if (!ctx->working)
+			{
+				static char *str = "\377\377\377\377heartbeat DarkPlaces\n";
+				size_t k, d;
+				SDL_WaitThread(ctx->thread, NULL);
+
+				if (sv_reportheartbeats.value)
+					for (k = 0; k < ctx->nummasters; k++)
+						if (!ctx->master[k].okay)
+							Con_Warning("Unable to resolve master %s\n", ctx->master[k].name);
+				for (k = 0; k < ctx->numresults; k++)
+				{
+					d = ctx->result[k].ldrv;
+					if (sv_reportheartbeats.value)
+						Con_Printf("Sending heartbeat to %s (%s)\n", ctx->result[k].name, net_landrivers[d].AddrToString(&ctx->result[k].addr, false));
+					net_landrivers[d].Write(net_landrivers[d].listeningSock, (byte*)str, strlen(str), &ctx->result[k].addr);
+				}
+
+				Z_Free(ctx); //don't need it no more
+				heartbeatctx = ctx = NULL;
+			}
+		}
+		else if (Sys_DoubleTime() > heartbeat_time)
 		{
 			//darkplaces here refers to the master server protocol, rather than the game protocol
 			//(specifies that the server responds to infoRequest packets from the master)
-			char *str = "\377\377\377\377heartbeat DarkPlaces\n";
-			size_t k;
-			struct qsockaddr addr;
-			heartbeat_time = Sys_DoubleTime() + 300;
+			size_t k, l = 0;
+			heartbeat_time = Sys_DoubleTime() + q_max(30,sv_heartbeat_interval.value);
 
 			for (k = 0; net_masters[k].string; k++)
+				l += strlen(net_masters[k].string)+1;
+			heartbeatctx = ctx = Z_Malloc(sizeof(*ctx) + l);
+			for (k = 0, l = 0; net_masters[k].string; k++)
 			{
-				if (!*net_masters[k].string)
-					continue;
-				for (net_landriverlevel = 0; net_landriverlevel < net_numlandrivers; net_landriverlevel++)
+				if (*net_masters[k].string)
 				{
-					if (net_landrivers[net_landriverlevel].initialized && dfunc.listeningSock != INVALID_SOCKET)
-					{
-						if (dfunc.GetAddrFromName(net_masters[k].string, &addr) >= 0)
-						{
-							if (sv_reportheartbeats.value)
-								Con_Printf("Sending heartbeat to %s\n", net_masters[k].string);
-							dfunc.Write(dfunc.listeningSock, (byte*)str, strlen(str), &addr);
-						}
-						else
-						{
-							if (sv_reportheartbeats.value)
-								Con_Printf("Unable to resolve %s\n", net_masters[k].string);
-						}
-					}
+					strcpy(    (ctx->master[ctx->nummasters].name = (char*)(ctx+1)+l), net_masters[k].string);	//copy the names over, just in case there's races
+					l += strlen(ctx->master[ctx->nummasters].name)+1;
+					ctx->nummasters++;
 				}
 			}
+			ctx->working = true;
+			ctx->thread = SDL_CreateThread(DNSLookupThread, "heartbeatdns", ctx);
+			if (!ctx->thread)	//bum...
+				ctx->working = false;	//just clean it up later.
 		}
 	}
 

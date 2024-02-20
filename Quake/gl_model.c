@@ -43,6 +43,8 @@ static void Mod_Print (void);
 static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 cvar_t	gl_load24bit = {"gl_load24bit", "1", CVAR_ARCHIVE};
 static cvar_t	mod_ignorelmscale = {"mod_ignorelmscale", "0"};
+static cvar_t	mod_lightscale_broken = {"mod_lightscale_broken", "1"};	//match vanilla's brokenness bug with dlights and scaled textures. decoupled_lm bypasses this obviously buggy setting because zomgletmefixstuffffs
+cvar_t	mod_lightgrid = {"mod_lightgrid", "1"};	//mostly for debugging, I dunno. just leave it set to 1.
 cvar_t	r_replacemodels = {"r_replacemodels", "", CVAR_ARCHIVE};
 static cvar_t	external_vis = {"external_vis", "1", CVAR_ARCHIVE};
 
@@ -72,6 +74,8 @@ void Mod_Init (void)
 	Cvar_RegisterVariable (&gl_load24bit);
 	Cvar_RegisterVariable (&r_replacemodels);
 	Cvar_RegisterVariable (&mod_ignorelmscale);
+	Cvar_RegisterVariable (&mod_lightscale_broken);
+	Cvar_RegisterVariable (&mod_lightgrid);
 
 	Cmd_AddCommand ("mcache", Mod_Print);
 
@@ -1433,14 +1437,14 @@ CalcSurfaceExtents
 Fills in s->texturemins[] and s->extents[]
 ================
 */
-static void CalcSurfaceExtents (msurface_t *s)
+static void CalcSurfaceExtents (msurface_t *s, int lmshift)
 {
 	float	mins[2], maxs[2], val;
 	int		i,j, e;
 	mvertex_t	*v;
 	mtexinfo_t	*tex;
 	int		bmins[2], bmaxs[2];
-	int maxextent, lmscale;
+	int lmscale;
 
 	mins[0] = mins[1] = FLT_MAX;
 	maxs[0] = maxs[1] = -FLT_MAX;
@@ -1484,18 +1488,24 @@ static void CalcSurfaceExtents (msurface_t *s)
 		}
 	}
 
-	lmscale = 1<<s->lmshift;
-	maxextent = q_max(LMBLOCK_WIDTH,LMBLOCK_HEIGHT)*lmscale;
+	lmscale = 1<<lmshift;
 
 	for (i=0 ; i<2 ; i++)
 	{
 		bmins[i] = floor(mins[i]/lmscale);
 		bmaxs[i] = ceil(maxs[i]/lmscale);
 
-		s->texturemins[i] = bmins[i] * lmscale;
-		s->extents[i] = (bmaxs[i] - bmins[i]) * lmscale;
+		s->lmvecs[i][0] = s->texinfo->vecs[i][0] / lmscale;
+		s->lmvecs[i][1] = s->texinfo->vecs[i][1] / lmscale;
+		s->lmvecs[i][2] = s->texinfo->vecs[i][2] / lmscale;
+		s->lmvecs[i][3] = s->texinfo->vecs[i][3] / lmscale + 0.5/*sigh*/ - bmins[i];
+		if (mod_lightscale_broken.value)
+			s->lmvecscale[i] = 16;	//luxels->qu... except buggy so dlights have the wrong spread on large surfaces (blame shib7)
+		else
+			s->lmvecscale[i] = 1.0f/VectorLength(s->lmvecs[i]);	//luxels->qu
+		s->extents[i] = bmaxs[i] - bmins[i];
 
-		if ( !(tex->flags & TEX_SPECIAL) && s->extents[i] > maxextent) //johnfitz -- was 512 in glquake, 256 in winquake
+		if ( !(tex->flags & TEX_SPECIAL) && s->extents[i] >= (i?LMBLOCK_HEIGHT:LMBLOCK_WIDTH)) //johnfitz -- was 512 in glquake, 256 in winquake
 		{
 			s->extents[i] = 1;
 //			Sys_Error ("Bad surface extents");
@@ -1560,6 +1570,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 	int lumpsize;
 	char scalebuf[16];
 	int facestyles;
+	struct decoupled_lm_info_s *decoupledlm = NULL;
 
 	if (bsp2)
 	{
@@ -1586,12 +1597,38 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 	if (!mod_ignorelmscale.value)
 	{
-		lmshift = Q1BSPX_FindLump("LMSHIFT", &lumpsize);
-		if (lumpsize != sizeof(*lmshift)*count)
+		decoupledlm = Q1BSPX_FindLump("DECOUPLED_LM", &lumpsize); //RGB packed data
+		if (decoupledlm && lumpsize == count*sizeof(*decoupledlm))
+		{	//basically stomps over the lmshift+lmoffset stuff above. lmstyle/lmstyle16+lit/hdr+lux info is still needed
 			lmshift = NULL;
-		lmoffset = Q1BSPX_FindLump("LMOFFSET", &lumpsize);
-		if (lumpsize != sizeof(*lmoffset)*count)
 			lmoffset = NULL;
+		}
+		else
+		{
+			decoupledlm = NULL;
+
+			lmshift = Q1BSPX_FindLump("LMSHIFT", &lumpsize);
+			if (lumpsize != sizeof(*lmshift)*count)
+				lmshift = NULL;
+			lmoffset = Q1BSPX_FindLump("LMOFFSET", &lumpsize);
+			if (lumpsize != sizeof(*lmoffset)*count)
+				lmoffset = NULL;
+
+			if (Mod_ParseWorldspawnKey(loadmodel, "lightmap_scale", scalebuf, sizeof(scalebuf)))
+			{
+				char *e;
+				i = strtol(scalebuf, &e, 10);
+				if (i < 0 || *e)
+					Con_Warning("Incorrect value for lightmap_scale field - %s - should be texels-per-luxel (and power-of-two), use 16 (or omit) to match vanilla quake.\n", scalebuf);
+				else if (i == 0)
+					;	//silently use default when its explicitly set to 0 or empty. a bogus value but oh well.
+				else
+				{
+					for(defaultshift = 0; i > 1; defaultshift++)
+						i >>= 1;
+				}
+			}
+		}
 		lmstyle16 = Q1BSPX_FindLump("LMSTYLE16", &lumpsize);
 		stylesperface = lumpsize/(sizeof(*lmstyle16)*count);
 		if (lumpsize != sizeof(*lmstyle16)*stylesperface*count)
@@ -1603,13 +1640,11 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			if (lumpsize != sizeof(*lmstyle8)*stylesperface*count)
 				lmstyle8 = NULL;
 		}
+	}
 
-		if (Mod_ParseWorldspawnKey(loadmodel, "lightmap_scale", scalebuf, sizeof(scalebuf)))
-		{
-			i = atoi(scalebuf);
-			for(defaultshift = 0; i > 1; defaultshift++)
-				i >>= 1;
-		}
+	{
+		void *lglump = Q1BSPX_FindLump("LIGHTGRID_OCTREE", &lumpsize);
+		BSPX_LightGridLoad(loadmodel, lglump, lumpsize);
 	}
 
 	loadmodel->surfaces = out;
@@ -1667,9 +1702,33 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 
 		out->plane = loadmodel->planes + planenum;
 		out->texinfo = loadmodel->texinfo + texinfon;
-		out->lmshift = shift;
 
-		CalcSurfaceExtents (out);
+		if (decoupledlm)
+		{
+			lofs = LittleLong(decoupledlm->lmoffset);
+			out->extents[0] = (unsigned short)LittleShort(decoupledlm->lmsize[0]) - 1;
+			out->extents[1] = (unsigned short)LittleShort(decoupledlm->lmsize[1]) - 1;
+			out->lmvecs[0][0] = LittleFloat(decoupledlm->lmvecs[0][0]);
+			out->lmvecs[0][1] = LittleFloat(decoupledlm->lmvecs[0][1]);
+			out->lmvecs[0][2] = LittleFloat(decoupledlm->lmvecs[0][2]);
+			out->lmvecs[0][3] = LittleFloat(decoupledlm->lmvecs[0][3]) + 0.5f; //sigh
+			out->lmvecs[1][0] = LittleFloat(decoupledlm->lmvecs[1][0]);
+			out->lmvecs[1][1] = LittleFloat(decoupledlm->lmvecs[1][1]);
+			out->lmvecs[1][2] = LittleFloat(decoupledlm->lmvecs[1][2]);
+			out->lmvecs[1][3] = LittleFloat(decoupledlm->lmvecs[1][3]) + 0.5f; //sigh
+			out->lmvecscale[0] = 1.0f/VectorLength(out->lmvecs[0]);	//luxels->qu
+			out->lmvecscale[1] = 1.0f/VectorLength(out->lmvecs[1]);
+			decoupledlm++;
+
+			//make sure we don't segfault even if the texture coords get crappified.
+			if (out->extents[0] >= LMBLOCK_WIDTH || out->extents[1] >= LMBLOCK_HEIGHT)
+			{
+				Con_Warning("%s: Bad surface extents (%i*%i, max %i*%u).\n", scalebuf, out->extents[0], out->extents[1], LMBLOCK_WIDTH, LMBLOCK_HEIGHT);
+				out->extents[0] = out->extents[1] = 1;
+			}
+		}
+		else
+			CalcSurfaceExtents (out, shift);
 
 		Mod_CalcSurfaceBounds (out); //johnfitz -- for per-surface frustum culling
 
@@ -1681,7 +1740,7 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			;	//count the styles so we can bound-check properly.
 		if (lofs == -1)
 			out->samples = NULL;
-		else if (lofs+facestyles*((out->extents[0]>>out->lmshift)+1)*((out->extents[1]>>out->lmshift)+1) > loadmodel->lightdatasamples)
+		else if (lofs+facestyles*((out->extents[0])+1)*((out->extents[1])+1) > loadmodel->lightdatasamples)
 			out->samples = NULL; //corrupt...
 		else if (loadmodel->flags & MOD_HDRLIGHTING)
 			out->samples = loadmodel->lightdata + (lofs * 4); //spike -- hdr lighting data is 4-aligned

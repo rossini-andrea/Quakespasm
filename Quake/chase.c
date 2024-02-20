@@ -48,14 +48,25 @@ TraceLine
 TODO: impact on bmodels, monsters
 ==============
 */
-void TraceLine (vec3_t start, vec3_t end, vec3_t impact)
+void TraceLine (vec3_t start, vec3_t end, float pushoff, vec3_t impact)
 {
 	trace_t	trace;
 
 	memset (&trace, 0, sizeof(trace));
+	trace.fraction = 1;
+	trace.allsolid = true;
+	VectorCopy (end, trace.endpos);
 	SV_RecursiveHullCheck (cl.worldmodel->hulls, start, end, &trace, CONTENTMASK_ANYSOLID);
 
 	VectorCopy (trace.endpos, impact);
+
+	if (pushoff && trace.fraction < 1)	//push away from the impact plane by the distance specified, so our camera's near clip plane does not intersect the wall.
+	{
+		vec3_t dir;
+		VectorSubtract(start, end, dir);
+		pushoff = pushoff / DotProduct(dir, trace.plane.normal);	//distance needs to be bigger if the trace is co-planar to the surface
+		VectorMA(impact, pushoff, dir, impact);
+	}
 }
 
 /*
@@ -91,28 +102,26 @@ void Chase_UpdateForDrawing (void)
 
 	// calc ideal camera location before checking for walls
 	for (i=0 ; i<3 ; i++)
-		ideal[i] = cl.viewent.origin[i]
+		ideal[i] = r_refdef.vieworg[i]
 		- forward[i]*chase_back.value
 		+ right[i]*chase_right.value;
 		//+ up[i]*chase_up.value;
-	ideal[2] = cl.viewent.origin[2] + chase_up.value;
+	ideal[2] = r_refdef.vieworg[2] + chase_up.value;
 
 	// make sure camera is not in or behind a wall
-	TraceLine(r_refdef.vieworg, ideal, temp);
-	if (VectorLength(temp) != 0)
-		VectorCopy(temp, ideal);
+	TraceLine(r_refdef.vieworg, ideal, NEARCLIP, ideal);
+
+	// find the spot the player is looking at
+	VectorMA (r_refdef.vieworg, 1<<20, forward, temp);
+	TraceLine (r_refdef.vieworg, temp, 0, crosshair);
 
 	// place camera
 	VectorCopy (ideal, r_refdef.vieworg);
 
-	// find the spot the player is looking at
-	VectorMA (cl.viewent.origin, 1<<20, forward, temp);
-	TraceLine (cl.viewent.origin, temp, crosshair);
-
 	// calculate camera angles to look at the same spot
 	VectorSubtract (crosshair, r_refdef.vieworg, temp);
 	VectorAngles (temp, NULL, r_refdef.viewangles);
-	if (r_refdef.viewangles[PITCH] == 90 || r_refdef.viewangles[PITCH] == -90)
+	if (r_refdef.viewangles[PITCH] >= 89.9 || r_refdef.viewangles[PITCH] <= -89.9)
 		r_refdef.viewangles[YAW] = cl.viewangles[YAW];
 }
 

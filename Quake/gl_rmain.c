@@ -572,7 +572,6 @@ void R_SetFrustum (float fovx, float fovy)
 GL_SetFrustum -- johnfitz -- written to replace MYgluPerspective
 =============
 */
-#define NEARCLIP 4
 float frustum_skew = 0.0; //used by r_stereo
 /*void GL_SetFrustum(float fovx, float fovy)
 {

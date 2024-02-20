@@ -698,8 +698,8 @@ dynamic:
 					theRect->w += theRect->l - fa->light_s;
 				theRect->l = fa->light_s;
 			}
-			smax = (fa->extents[0]>>fa->lmshift)+1;
-			tmax = (fa->extents[1]>>fa->lmshift)+1;
+			smax = fa->extents[0]+1;
+			tmax = fa->extents[1]+1;
 			if ((theRect->w + theRect->l) < (fa->light_s + smax))
 				theRect->w = (fa->light_s-theRect->l)+smax;
 			if ((theRect->h + theRect->t) < (fa->light_t + tmax))
@@ -800,8 +800,8 @@ void GL_CreateSurfaceLightmap (qmodel_t *model, msurface_t *surf)
 		return;
 	}
 
-	smax = (surf->extents[0]>>surf->lmshift)+1;
-	tmax = (surf->extents[1]>>surf->lmshift)+1;
+	smax = surf->extents[0]+1;
+	tmax = surf->extents[1]+1;
 
 	surf->lightmaptexturenum = AllocBlock (smax, tmax, &surf->light_s, &surf->light_t);
 	base = lightmaps[surf->lightmaptexturenum].data;
@@ -821,7 +821,6 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 	float		*vec;
 	float		s, t, s0, t0;
 	glpoly_t	*poly;
-	int			lmscale = (1<<fa->lmshift);
 
 // reconstruct the polygon
 	pedges = currentmodel->edges;
@@ -880,17 +879,13 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 		//
 		// lightmap texture coordinates
 		//
-		s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3];
-		s -= fa->texturemins[0];
-		s += fa->light_s*lmscale;
-		s += lmscale/2.0;
-		s /= LMBLOCK_WIDTH*lmscale; //fa->texinfo->texture->width;
+		s = DotProduct (vec, fa->lmvecs[0]) + fa->lmvecs[0][3];
+		s += fa->light_s;
+		s /= LMBLOCK_WIDTH;
 
-		t = DotProduct (vec, fa->texinfo->vecs[1]) + fa->texinfo->vecs[1][3];
-		t -= fa->texturemins[1];
-		t += fa->light_t*lmscale;
-		t += lmscale/2.0;
-		t /= LMBLOCK_HEIGHT*lmscale; //fa->texinfo->texture->height;
+		t = DotProduct (vec, fa->lmvecs[1]) + fa->lmvecs[1][3];
+		t += fa->light_t;
+		t /= LMBLOCK_HEIGHT;
 
 		poly->verts[i][5] = s;
 		poly->verts[i][6] = t;
@@ -1143,18 +1138,14 @@ void R_AddDynamicLights (msurface_t *surf)
 	int			s, t;
 	int			i;
 	int			smax, tmax;
-	mtexinfo_t	*tex;
 	//johnfitz -- lit support via lordhavoc
 	float		cred, cgreen, cblue, brightness;
 	unsigned	*bl;
 	//johnfitz
 	vec3_t		lightofs;	//Spike: light surfaces based upon where they are now instead of their default position.
-	int			lmscale;
 
-	smax = (surf->extents[0]>>surf->lmshift)+1;
-	tmax = (surf->extents[1]>>surf->lmshift)+1;
-	tex = surf->texinfo;
-	lmscale = 1<<surf->lmshift;
+	smax = surf->extents[0]+1;
+	tmax = surf->extents[1]+1;
 
 	for (lnum=0 ; lnum<MAX_DLIGHTS ; lnum++)
 	{
@@ -1176,11 +1167,8 @@ void R_AddDynamicLights (msurface_t *surf)
 					surf->plane->normal[i]*dist;
 		}
 
-		local[0] = DotProduct (impact, tex->vecs[0]) + tex->vecs[0][3];
-		local[1] = DotProduct (impact, tex->vecs[1]) + tex->vecs[1][3];
-
-		local[0] -= surf->texturemins[0];
-		local[1] -= surf->texturemins[1];
+		local[0] = DotProduct (impact, surf->lmvecs[0]) + surf->lmvecs[0][3];
+		local[1] = DotProduct (impact, surf->lmvecs[1]) + surf->lmvecs[1][3];
 
 		//johnfitz -- lit support via lordhavoc
 		bl = blocklights;
@@ -1190,12 +1178,12 @@ void R_AddDynamicLights (msurface_t *surf)
 		//johnfitz
 		for (t = 0 ; t<tmax ; t++)
 		{
-			td = local[1] - t*lmscale;
+			td = (local[1] - t)*surf->lmvecscale[1];
 			if (td < 0)
 				td = -td;
 			for (s=0 ; s<smax ; s++)
 			{
-				sd = local[0] - s*lmscale;
+				sd = (local[0] - s)*surf->lmvecscale[0];
 				if (sd < 0)
 					sd = -sd;
 				if (sd > td)
@@ -1236,8 +1224,8 @@ void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
 
 	surf->cached_dlight = (surf->dlightframe == r_framecount);
 
-	smax = (surf->extents[0]>>surf->lmshift)+1;
-	tmax = (surf->extents[1]>>surf->lmshift)+1;
+	smax = surf->extents[0]+1;
+	tmax = surf->extents[1]+1;
 	size = smax*tmax;
 
 	if (model->lightdata)

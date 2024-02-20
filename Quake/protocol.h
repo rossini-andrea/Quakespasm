@@ -440,7 +440,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	EF_BRIGHTLIGHT 				4
 #define	EF_DIMLIGHT 				8
 //#define EF_NODRAW					16
-//#define EF_ADDITIVE				32
+#define EF_ADDITIVE					32
 #define EF_BLUE						64
 #define EF_RED						128
 //#define EFDP_NOGUNBOB				(1u<<8)

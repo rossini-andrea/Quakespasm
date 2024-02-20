@@ -33,7 +33,6 @@ extern cvar_t r_clearcolor;
 extern cvar_t r_drawflat;
 extern cvar_t r_flatlightstyles;
 extern cvar_t gl_fullbrights;
-extern cvar_t gl_farclip;
 extern cvar_t gl_overbright;
 extern cvar_t gl_overbright_models;
 extern cvar_t r_waterwarp;
