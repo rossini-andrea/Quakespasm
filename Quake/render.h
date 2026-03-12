@@ -163,7 +163,9 @@ void R_ViewChanged (vrect_t *pvrect, int lineadj, float aspect);
 //void R_InitSky (struct texture_s *mt);	// called at level load
 
 void R_CheckEfrags (void); //johnfitz
-void R_AddEfrags (entity_t *ent);
+//void R_AddEfrags (entity_t *ent);
+struct cl_static_entities_s;
+void CL_LinkStaticEnt(struct cl_static_entities_s *ent);
 
 void R_NewMap (void);
 

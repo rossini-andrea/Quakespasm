@@ -23,8 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
-int	r_dlightframecount;
-
 extern cvar_t r_flatlightstyles; //johnfitz
 
 //Spike - made this a general function
@@ -162,8 +160,6 @@ void R_RenderDlights (void)
 	if (!gl_flashblend.value)
 		return;
 
-	r_dlightframecount = r_framecount + 1;	// because the count hasn't
-											//  advanced yet for this frame
 	glDepthMask (0);
 	glDisable (GL_TEXTURE_2D);
 	glShadeModel (GL_SMOOTH);
@@ -199,7 +195,7 @@ DYNAMIC LIGHTS
 R_MarkLights -- johnfitz -- rewritten to use LordHavoc's lighting speedup
 =============
 */
-void R_MarkLights (dlight_t *light, vec3_t lightorg, int num, mnode_t *node)
+void R_MarkLights (dlight_t *light, vec3_t lightorg, int framecount, int num, mnode_t *node)
 {
 	mplane_t	*splitplane;
 	msurface_t	*surf;
@@ -247,10 +243,10 @@ start:
 		// compare to minimum light
 		if ((s*s+t*t+dist*dist) < maxdist)
 		{
-			if (surf->dlightframe != r_dlightframecount) // not dynamic until now
+			if (surf->dlightframe != framecount) // not dynamic until now
 			{
 				surf->dlightbits[num >> 5] = 1U << (num & 31);
-				surf->dlightframe = r_dlightframecount;
+				surf->dlightframe = framecount;
 			}
 			else // already dynamic
 				surf->dlightbits[num >> 5] |= 1U << (num & 31);
@@ -258,9 +254,9 @@ start:
 	}
 
 	if (node->children[0]->contents >= 0)
-		R_MarkLights (light, lightorg, num, node->children[0]);
+		R_MarkLights (light, lightorg, framecount, num, node->children[0]);
 	if (node->children[1]->contents >= 0)
-		R_MarkLights (light, lightorg, num, node->children[1]);
+		R_MarkLights (light, lightorg, framecount, num, node->children[1]);
 }
 
 /*
@@ -275,9 +271,6 @@ void R_PushDlights (void)
 
 	if (gl_flashblend.value)
 		return;
-
-	r_dlightframecount = r_framecount + 1;	// because the count hasn't
-											//  advanced yet for this frame
 	if (!r_refdef.drawworld)
 		return;
 	l = cl_dlights;
@@ -286,7 +279,7 @@ void R_PushDlights (void)
 	{
 		if (l->die < cl.time || !l->radius)
 			continue;
-		R_MarkLights (l, l->origin, i, cl.worldmodel->nodes);
+		R_MarkLights (l, l->origin, r_framecount, i, cl.worldmodel->nodes);
 	}
 }
 

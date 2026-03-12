@@ -1186,6 +1186,7 @@ void SV_BuildEntityState(client_t *client, edict_t *ent, entity_state_t *state)
 }
 
 byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
+static void SV_AddToFatPVS (vec3_t org, mnode_t *node, qmodel_t *worldmodel);
 static void SVFTE_BuildSnapshotForClient (client_t *client)
 {
 	unsigned int	e, i;
@@ -1208,6 +1209,11 @@ static void SVFTE_BuildSnapshotForClient (client_t *client)
 // find the client's PVS
 	VectorAdd (clent->v.origin, clent->v.view_ofs, org);
 	pvs = SV_FatPVS (org, qcvm->worldmodel);
+	if (sv.skyroom_pos_known)
+	{
+		VectorMA(sv.skyroom_pos, sv.skyroom_pos[3], org, org);
+		SV_AddToFatPVS (org, qcvm->worldmodel->nodes, qcvm->worldmodel); //spike -- allow _skyroom term to punch a hole through the server's pvs. FIXME: no paralax considered here.
+	}
 
 	if (maxentities > (unsigned int)qcvm->num_edicts)
 		maxentities = (unsigned int)qcvm->num_edicts;
@@ -1237,7 +1243,7 @@ static void SVFTE_BuildSnapshotForClient (client_t *client)
 		}
 
 		eflags = 0;
-		emiteffect = GetEdictFieldValue(ent, qcvm->extfields.emiteffectnum)->_float;
+		emiteffect = GetEdictFieldEval(ent, emiteffectnum)->_float;
 		iscsqc = cancsqc && GetEdictFieldEval(ent, SendEntity)->function;
 		if (ent != clent)	// clent is ALLWAYS sent
 		{
@@ -1245,7 +1251,7 @@ static void SVFTE_BuildSnapshotForClient (client_t *client)
 			if ((!ent->v.modelindex || !PR_GetString(ent->v.model)[0]) && !emiteffect && !iscsqc)
 			{
 invisible:
-				if (client->pendingcsqcentities_bits[e] /*&& !((int)GetEdictFieldEval(ent, pvsflags)->_float & PVFS_NOREMOVE)*/)
+				if (client->pendingcsqcentities_bits[e] && !((int)GetEdictFieldEval(ent, pvsflags)->_float & PVSF_NOREMOVE))
 					client->pendingcsqcentities_bits[e] |= SENDFLAG_REMOVE;
 				continue;
 			}
@@ -1255,28 +1261,27 @@ invisible:
 				eflags |= EFLAGS_VIEWMODEL;
 			else if (val && val->edict)
 				goto invisible;
-			else
+			else switch((int)GetEdictFieldEval(ent, pvsflags)->_float&PVSF_MODE_MASK)
 			{
+			case PVSF_NOTRACECHECK:	//we don't do trace checks anyway, oh well.
+			case PVSF_NORMALPVS:
 				//attached entities should use the pvs of the parent rather than the child (because the child will typically be bugging out around '0 0 0', so won't be useful)
 				parent = ent;
-				while ((val = GetEdictFieldValue(parent, qcvm->extfields.tag_entity)) && val->edict)
-					parent = PROG_TO_EDICT(val->edict);
-				if (parent->num_leafs)
+				while (GetEdictFieldEval(parent, tag_entity)->edict)
+					parent = PROG_TO_EDICT(GetEdictFieldEval(parent, tag_entity)->edict);
+				if (parent->num_leafs < MAX_ENT_LEAFS)	//assumed to be in all leafs, if there's an overflow.
 				{
 					// ignore if not touching a PV leaf
 					for (i=0 ; i < parent->num_leafs ; i++)
 						if (pvs[parent->leafnums[i] >> 3] & (1 << (parent->leafnums[i]&7) ))
 							break;
-
-					// ericw -- added ent->num_leafs < MAX_ENT_LEAFS condition.
-					//
-					// if ent->num_leafs == MAX_ENT_LEAFS, the ent is visible from too many leafs
-					// for us to say whether it's in the PVS, so don't try to vis cull it.
-					// this commonly happens with rotators, because they often have huge bboxes
-					// spanning the entire map, or really tall lifts, etc.
-					if (i == parent->num_leafs && parent->num_leafs < MAX_ENT_LEAFS)
+					if (i == parent->num_leafs)
 						goto invisible;		// not visible
 				}
+				break;
+			case PVSF_USEPHS:	//we don't support PHS. expand it wider than asked
+			case PVSF_IGNOREPVS:
+				break;
 			}
 		}
 
@@ -2111,8 +2116,8 @@ retry:
 	MSG_WriteByte (&client->message, svc_setview);
 	MSG_WriteShort (&client->message, NUM_FOR_EDICT(client->edict));
 
-	MSG_WriteByte (&host_client->message, svc_signonnum);
-	MSG_WriteByte (&host_client->message, 1);
+	MSG_WriteByte (&client->message, svc_signonnum);
+	MSG_WriteByte (&client->message, 1);
 
 	client->sendsignon = PRESPAWN_FLUSH;
 
@@ -2367,7 +2372,24 @@ static int	fatbytes;
 static byte	*fatpvs;
 static int	fatpvs_capacity;
 
-void SV_AddToFatPVS (vec3_t org, mnode_t *node, qmodel_t *worldmodel) //johnfitz -- added worldmodel as a parameter
+
+void SV_SetupSkyRoom(char *value)
+{
+	sv.skyroom_pos_known = true;
+
+	sv.skyroom_pos[0] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+	sv.skyroom_pos[1] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+	sv.skyroom_pos[2] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+	sv.skyroom_pos[3] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+
+//	sv.skyroom_orientation[3] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+//	sv.skyroom_orientation[0] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+//	sv.skyroom_orientation[1] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+//	sv.skyroom_orientation[2] = strtod(value, &value); while(*value == ' ' || *value == '\t') value++;
+}
+
+
+static void SV_AddToFatPVS (vec3_t org, mnode_t *node, qmodel_t *worldmodel) //johnfitz -- added worldmodel as a parameter
 {
 	int		i;
 	byte	*pvs;
@@ -2481,6 +2503,11 @@ void SV_WriteEntitiesToClient (client_t *client, sizebuf_t *msg)
 // find the client's PVS
 	VectorAdd (clent->v.origin, clent->v.view_ofs, org);
 	pvs = SV_FatPVS (org, qcvm->worldmodel);
+	if (sv.skyroom_pos_known)
+	{
+		VectorMA(sv.skyroom_pos, sv.skyroom_pos[3], org, org);
+		SV_AddToFatPVS (org, qcvm->worldmodel->nodes, qcvm->worldmodel); //spike -- allow _skyroom term to punch a hole through the server's pvs. FIXME: no paralax considered here.
+	}
 
 // send over all entities (excpet the client) that touch the pvs
 	ent = NEXT_EDICT(qcvm->edicts);

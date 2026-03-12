@@ -58,7 +58,7 @@ cvar_t	cl_maxpitch = {"cl_maxpitch", "90", CVAR_ARCHIVE}; //johnfitz -- variable
 cvar_t	cl_minpitch = {"cl_minpitch", "-90", CVAR_ARCHIVE}; //johnfitz -- variable pitch clamping
 
 cvar_t cl_recordingdemo = {"cl_recordingdemo", "", CVAR_ROM};	//the name of the currently-recording demo.
-cvar_t	cl_demoreel = {"cl_demoreel", "0", CVAR_ARCHIVE};
+cvar_t	cl_demoreel = {"cl_demoreel", "1", CVAR_ARCHIVE};
 
 client_static_t	cls;
 client_state_t	cl;
@@ -78,8 +78,8 @@ void CL_ClearTrailStates(void)
 	int i;
 	for (i = 0; i < cl.num_statics; i++)
 	{
-		PScript_DelinkTrailstate(&(cl.static_entities[i]->trailstate));
-		PScript_DelinkTrailstate(&(cl.static_entities[i]->emitstate));
+		PScript_DelinkTrailstate(&(cl.static_entities[i].ent->trailstate));
+		PScript_DelinkTrailstate(&(cl.static_entities[i].ent->emitstate));
 	}
 	for (i = 0; i < cl.max_edicts; i++)
 	{
@@ -146,6 +146,8 @@ void CL_ClearState (void)
 #ifdef PSET_SCRIPT
 	PScript_Shutdown();
 #endif
+
+	RSceneCache_Shutdown();
 
 	if (!sv.active)
 		Draw_ReloadTextures(false);
@@ -495,7 +497,7 @@ static qboolean CL_LerpEntity(entity_t *ent, vec3_t org, vec3_t ang, float frac)
 	vec3_t delta;
 	qboolean teleported = false;
 
-	if (ent->netstate.pmovetype && ent-cl.entities==cl.viewentity && qcvm->worldmodel && !cl_nopred.value)
+	if (ent->netstate.pmovetype && ent-cl.entities==cl.viewentity && qcvm->worldmodel && !cl_nopred.value && cls.signon == SIGNONS)
 	{	//note: V_CalcRefdef will copy from cl.entities[viewent] to get its origin, so doing it here is the proper place anyway.
 		static struct
 		{
@@ -1105,6 +1107,8 @@ qboolean CL_CheckDownload(const char *filename)
 		return true;	//block while we're already downloading something
 	if (!cl.protocol_dpdownload)
 		return false;	//can't download anyway
+	if (cl.wronggamedir)
+		return false;	//don't download them into the wrong place. this may be awkward for id1 content though (if such a thing logically exists... like custom maps).
 	if (*cls.download.current && !strcmp(cls.download.current, filename))
 		return false;	//if the previous download failed, don't endlessly retry.
 	if (COM_FileExists(filename, NULL))
@@ -1203,10 +1207,10 @@ qboolean CL_CheckDownloads(void)
 	//make sure ents have the correct models, now that they're actually loaded.
 	for (i = 0; i < cl.num_statics; i++)
 	{
-		if (cl.static_entities[i]->model)
+		if (cl.static_entities[i].ent->model)
 			continue;
-		cl.static_entities[i]->model = cl.model_precache[cl.static_entities[i]->netstate.modelindex];
-		R_AddEfrags (cl.static_entities[i]);
+		cl.static_entities[i].ent->model = cl.model_precache[cl.static_entities[i].ent->netstate.modelindex];
+		CL_LinkStaticEnt(&cl.static_entities[i]);
 	}
 	return true;
 }
@@ -1245,8 +1249,8 @@ int CL_ReadFromServer (void)
 		CL_ParseServerMessage ();
 	} while (ret && cls.state == ca_connected);
 
-	if (cl_shownet.value)
-		Con_Printf ("\n");
+//	if (cl_shownet.value)
+//		Con_Printf ("\n");
 
 	PR_SwitchQCVM(&cl.qcvm);
 	CL_RelinkEntities ();

@@ -190,6 +190,8 @@ extern	float	load_subdivide_size; //johnfitz -- remember what subdivide_size val
 
 extern int		gl_stencilbits;
 
+extern GLint gl_hardware_maxsize;
+
 // Multitexture
 extern	qboolean	mtexenabled;
 extern	qboolean	gl_mtexable;
@@ -210,8 +212,12 @@ extern PFNGLBUFFERDATAARBPROC  GL_BufferDataFunc;
 extern PFNGLBUFFERSUBDATAARBPROC  GL_BufferSubDataFunc;
 extern PFNGLDELETEBUFFERSARBPROC  GL_DeleteBuffersFunc;
 extern PFNGLGENBUFFERSARBPROC  GL_GenBuffersFunc;
+extern PFNGLMAPBUFFERARBPROC	GL_MapBufferFunc;
+extern PFNGLUNMAPBUFFERARBPROC	GL_UnmapBufferFunc;
 extern	qboolean	gl_vbo_able;
 //ericw
+extern PFNGLMAPBUFFERRANGEPROC	GL_MapBufferRangeFunc;
+extern PFNGLBUFFERSTORAGEPROC	GL_BufferStorageFunc;
 
 // Pangocciolo - FBO
 extern	qboolean	gl_fbo_able;
@@ -358,9 +364,7 @@ extern overflowtimes_t dev_overflows; //this stores the last time overflow messa
 //johnfitz -- moved here from r_brush.c
 extern int gl_lightmap_format, lightmap_bytes;
 extern qboolean lightmaps_latecached;	//we need to rebuild lightmaps and model vbos before rendering.
-
-#define LMBLOCK_WIDTH	256	//FIXME: make dynamic. if we have a decent card there's no real reason not to use 4k or 16k (assuming there's no lightstyles/dynamics that need uploading...)
-#define LMBLOCK_HEIGHT	256 //Alternatively, use texture arrays, which would avoid the need to switch textures as often.
+extern int LMBLOCK_WIDTH, LMBLOCK_HEIGHT;	//FIXME: use texture arrays.
 
 typedef struct glRect_s {
 	unsigned short l,t,w,h;
@@ -372,9 +376,10 @@ struct lightmap_s
 	qboolean	modified;
 	glRect_t	rectchange;
 
-	// the lightmap texture data needs to be kept in
-	// main memory so texsubimage can update properly
-	byte		*data;//[4*LMBLOCK_WIDTH*LMBLOCK_HEIGHT];
+	// PBO use allows us to simply copy the lightmap data into a texture on-gpu, reducing stutters. It'll be writethrough though, so we need to keep things cache-friendly.
+	//the data ptr points to a persistently mapped buffer so we can paint it from other threads while the main thread is doing other work so other than creation+upload we can just treat it like regular memory with slightly different cache properties.
+	GLuint		pbohandle;
+	byte		*pbodata;//[4*LMBLOCK_WIDTH*LMBLOCK_HEIGHT];
 };
 extern struct lightmap_s *lightmaps;
 extern int lightmap_count;	//allocated lightmaps
@@ -412,7 +417,7 @@ qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
 void R_StoreEfrags (efrag_t **ppefrag);
 qboolean R_CullModelForEntity (entity_t *e);
 void R_RotateForEntity (vec3_t origin, vec3_t angles, unsigned char scale);
-void R_MarkLights (dlight_t *light, vec3_t lightorg, int num, mnode_t *node);
+void R_MarkLights (dlight_t *light, vec3_t lightorg, int framecount, int num, mnode_t *node);
 
 void R_InitParticles (void);
 void R_DrawParticles (void);
@@ -443,7 +448,7 @@ void R_RebuildAllLightmaps (void);
 int R_LightPoint (vec3_t p);
 
 void GL_SubdivideSurface (msurface_t *fa);
-void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride);
+void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride, entity_t *currentent, int framecount, dlight_t *lights);
 void R_RenderDynamicLightmaps (qmodel_t *model, msurface_t *fa);
 void R_UploadLightmaps (void);
 
@@ -482,6 +487,13 @@ void R_ClearTextureChains (qmodel_t *mod, texchain_t chain);
 void R_ChainSurface (msurface_t *surf, texchain_t chain);
 void R_DrawTextureChains (qmodel_t *model, entity_t *ent, texchain_t chain);
 void R_DrawWorld_Water (void);
+#ifndef SDL_THREADS_DISABLED
+void RSceneCache_Cleanup(qmodel_t *mod);
+void RSceneCache_Shutdown(void);
+qboolean RSceneCache_DrawSkySurfDepth(void);	//Draws sky surfaces.
+qboolean RSceneCache_HasSky(void);
+#endif
+extern byte *skipsubmodels;
 
 void GL_BindBuffer (GLenum target, GLuint buffer);
 void GL_ClearBufferBindings ();

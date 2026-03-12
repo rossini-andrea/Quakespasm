@@ -74,7 +74,7 @@ typedef struct
 {
 	vec3_t	origin;
 	float	radius;
-	float	die;				// stop lighting after this time
+	double	die;				// stop lighting after this time
 	float	decay;				// drop this each second
 	float	minlight;			// don't add when contributing less
 	int		key;
@@ -249,7 +249,13 @@ typedef struct
 	int			max_edicts;
 	int			num_entities;
 
-	entity_t	**static_entities; //spike -- was static
+	struct cl_static_entities_s
+	{
+		entity_t		*ent;
+		unsigned int	num_clusters;
+		int				clusternums[MAX_ENT_LEAFS];
+		vec3_t			absmin, absmax;
+	} *static_entities; //spike -- was static
 	int			max_static_entities;
 	int			num_statics;
 
@@ -263,6 +269,7 @@ typedef struct
 	unsigned	protocol_pext1;	//spike -- flag of fte protocol extensions
 	unsigned	protocol_pext2;	//spike -- flag of fte protocol extensions
 	qboolean	protocol_dpdownload;
+	qboolean	wronggamedir;	//blocks downloads
 
 #ifdef PSET_SCRIPT
 	qboolean	protocol_particles;

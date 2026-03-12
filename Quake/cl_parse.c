@@ -215,7 +215,7 @@ static int MSG_ReadSize16 (sizebuf_t *sb)
 	{
 		int solid = (((ssolid>>7) & 0x1F8) - 32+32768)<<16;	/*up can be negative*/
 		solid|= ((ssolid & 0x1F)<<3);
-		solid|= ((ssolid & 0x3E0)<<10);
+		solid|= ((ssolid & 0x3E0)<<6);
 		return solid;
 	}
 }
@@ -1338,7 +1338,6 @@ static void CL_ParseServerInfo (void)
 {
 	const char	*str;
 	int		i;
-	qboolean	gamedirswitchwarning = false;
 	char gamedir[1024];
 	char protname[64];
 
@@ -1407,7 +1406,7 @@ static void CL_ParseServerInfo (void)
 		q_strlcpy(gamedir, MSG_ReadString(), sizeof(gamedir));
 		if (!COM_GameDirMatches(gamedir))
 		{
-			gamedirswitchwarning = true;
+			cl.wronggamedir = true;
 		}
 	}
 
@@ -1425,10 +1424,6 @@ static void CL_ParseServerInfo (void)
 // parse signon message
 	str = MSG_ReadString ();
 	q_strlcpy (cl.levelname, str, sizeof(cl.levelname));
-
-// seperate the printfs so the server message can have a color
-	Con_Printf ("\n%s\n", Con_Quakebar(40)); //johnfitz
-	Con_Printf ("%c%s\n", 2, str);
 
 //johnfitz -- tell user which protocol this is
 	if (developer.value)
@@ -1471,8 +1466,13 @@ static void CL_ParseServerInfo (void)
 		q_snprintf(protname, sizeof(protname), "fte%i", cl.protocol);
 	else
 		q_snprintf(protname, sizeof(protname), "%i", cl.protocol);
-	Con_Printf ("Using protocol %s", protname);
-	Con_Printf ("\n");
+	if (con_x)	//some servers try to save spam by skipping the \n. don't make it ugly.
+		Con_Printf ("\n");
+	Con_Printf ("Using protocol %s\n", protname);
+
+	// seperate the printfs so the server message can have a color
+	Con_Printf ("\n%s\n", Con_Quakebar(40)); //johnfitz
+	Con_Printf ("%c%s\n", 2, str);
 
 // first we go through and touch all of the precache data that still
 // happens to be in the cache, so precaching something else doesn't
@@ -1546,10 +1546,13 @@ static void CL_ParseServerInfo (void)
 		cl.ackframes[cl.ackframes_count++] = -1;
 
 	//this is here, to try to make sure its a little more obvious that its there.
-	if (gamedirswitchwarning)
+	if (cl.wronggamedir)
 	{
+		const char *curgame = COM_GetGameNames(false);
+		if (!*curgame)
+			curgame = COM_GetGameNames(true);
 		Con_Warning("Server is using a different gamedir.\n");
-		Con_Warning("Current: %s\n", COM_GetGameNames(false));
+		Con_Warning("Current: %s\n", curgame);
 		Con_Warning("Server: %s\n", gamedir);
 		Con_Warning("You will probably want to switch gamedir to match the server.\n");
 	}
@@ -2005,16 +2008,16 @@ static void CL_ParseStatic (int version) //johnfitz -- added a parameter
 	if (i >= cl.max_static_entities)
 	{
 		int ec = 64;
-		entity_t **newstatics = realloc(cl.static_entities, sizeof(*newstatics) * (cl.max_static_entities+ec));
+		struct cl_static_entities_s *newstatics = realloc(cl.static_entities, sizeof(*newstatics) * (cl.max_static_entities+ec));
 		entity_t *newents = Hunk_Alloc(sizeof(*newents) * ec);
 		if (!newstatics || !newents)
 			Host_Error ("Too many static entities");
 		cl.static_entities = newstatics;
 		while (ec--)
-			cl.static_entities[cl.max_static_entities++] = newents++;
+			cl.static_entities[cl.max_static_entities++].ent = newents++;
 	}
 
-	ent = cl.static_entities[i];
+	ent = cl.static_entities[i].ent;
 	cl.num_statics++;
 	CL_ParseBaseline (ent, version); //johnfitz -- added second parameter
 
@@ -2034,8 +2037,7 @@ static void CL_ParseStatic (int version) //johnfitz -- added a parameter
 	ent->alpha = ent->baseline.alpha; //johnfitz -- alpha
 	VectorCopy (ent->baseline.origin, ent->origin);
 	VectorCopy (ent->baseline.angles, ent->angles);
-	if (ent->model)
-		R_AddEfrags (ent);
+	CL_LinkStaticEnt(&cl.static_entities[i]);
 }
 
 /*
@@ -2080,6 +2082,8 @@ static void CL_ParsePrecache(void)
 	case 0:	//models
 		if (index < MAX_MODELS)
 		{
+			if (cl.model_count == index)
+				cl.model_count = index+1;
 			q_strlcpy (cl.model_name[index], name, MAX_QPATH);
 			Mod_TouchModel (name);
 			if (!cl.sendprespawn)
@@ -2110,7 +2114,12 @@ static void CL_ParsePrecache(void)
 #endif
 	case 2:	//sounds
 		if (index < MAX_SOUNDS)
+		{
+			if (cl.sound_count == index)
+				cl.sound_count = index+1;
+			q_strlcpy (cl.sound_name[index], name, MAX_QPATH);
 			cl.sound_precache[index] = S_PrecacheSound (name);
+		}
 		break;
 //	case 3:	//unused
 	default:
@@ -2474,7 +2483,7 @@ CL_ParseServerMessage
 void CL_ParseServerMessage (void)
 {
 	int			cmd;
-	int			i;
+	int			i,j;
 	const char		*str; //johnfitz
 	int			lastcmd; //johnfitz
 
@@ -2621,25 +2630,25 @@ void CL_ParseServerMessage (void)
 		case svc_updatename:
 			Sbar_Changed ();
 			i = MSG_ReadByte ();
-			if (i >= cl.maxclients)
-				Host_Error ("CL_ParseServerMessage: svc_updatename > MAX_SCOREBOARD");
-			q_strlcpy (cl.scores[i].name, MSG_ReadString(), MAX_SCOREBOARDNAME);
+			str = MSG_ReadString();
+			if (i < cl.maxclients)
+				q_strlcpy (cl.scores[i].name, str, MAX_SCOREBOARDNAME);
 			break;
 
 		case svc_updatefrags:
 			Sbar_Changed ();
 			i = MSG_ReadByte ();
-			if (i >= cl.maxclients)
-				Host_Error ("CL_ParseServerMessage: svc_updatefrags > MAX_SCOREBOARD");
-			cl.scores[i].frags = MSG_ReadShort ();
+			j = MSG_ReadShort();
+			if (i < cl.maxclients)
+				cl.scores[i].frags = j;
 			break;
 
 		case svc_updatecolors:
 			Sbar_Changed ();
 			i = MSG_ReadByte ();
-			if (i >= cl.maxclients)
-				Host_Error ("CL_ParseServerMessage: svc_updatecolors > MAX_SCOREBOARD");
-			CL_NewTranslation (i, MSG_ReadByte());
+			j = MSG_ReadByte ();
+			if (i < cl.maxclients)
+				CL_NewTranslation (i, j);
 			break;
 
 		case svc_particle:

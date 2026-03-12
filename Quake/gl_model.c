@@ -247,6 +247,7 @@ void Mod_ClearAll (void)
 			mod->needload = true;
 			TexMgr_FreeTexturesForOwner (mod); //johnfitz
 			PScript_ClearSurfaceParticles(mod);
+			RSceneCache_Cleanup(mod);
 		}
 	}
 }
@@ -265,6 +266,7 @@ void Mod_ResetAll (void)
 		{
 			TexMgr_FreeTexturesForOwner (mod);
 			PScript_ClearSurfaceParticles(mod);
+			RSceneCache_Cleanup(mod);
 		}
 		memset(mod, 0, sizeof(qmodel_t));
 	}
@@ -1411,16 +1413,14 @@ static void Mod_LoadTexinfo (lump_t *l)
 		if (miptex >= loadmodel->numtextures-1 || !loadmodel->textures[miptex])
 		{
 			if (out->flags & TEX_SPECIAL)
-				out->texture = loadmodel->textures[loadmodel->numtextures-1];
+				miptex = loadmodel->numtextures-1;
 			else
-				out->texture = loadmodel->textures[loadmodel->numtextures-2];
+				miptex = loadmodel->numtextures-2;
 			out->flags |= TEX_MISSING;
 			missing++;
 		}
-		else
-		{
-			out->texture = loadmodel->textures[miptex];
-		}
+		out->texture = loadmodel->textures[miptex];
+		out->materialidx = miptex;
 		//johnfitz
 	}
 
@@ -1498,7 +1498,7 @@ static void CalcSurfaceExtents (msurface_t *s, int lmshift)
 		s->lmvecs[i][0] = s->texinfo->vecs[i][0] / lmscale;
 		s->lmvecs[i][1] = s->texinfo->vecs[i][1] / lmscale;
 		s->lmvecs[i][2] = s->texinfo->vecs[i][2] / lmscale;
-		s->lmvecs[i][3] = s->texinfo->vecs[i][3] / lmscale + 0.5/*sigh*/ - bmins[i];
+		s->lmvecs[i][3] = s->texinfo->vecs[i][3] / lmscale - bmins[i];
 		if (mod_lightscale_broken.value)
 			s->lmvecscale[i] = 16;	//luxels->qu... except buggy so dlights have the wrong spread on large surfaces (blame shib7)
 		else
@@ -1711,11 +1711,11 @@ static void Mod_LoadFaces (lump_t *l, qboolean bsp2)
 			out->lmvecs[0][0] = LittleFloat(decoupledlm->lmvecs[0][0]);
 			out->lmvecs[0][1] = LittleFloat(decoupledlm->lmvecs[0][1]);
 			out->lmvecs[0][2] = LittleFloat(decoupledlm->lmvecs[0][2]);
-			out->lmvecs[0][3] = LittleFloat(decoupledlm->lmvecs[0][3]) + 0.5f; //sigh
+			out->lmvecs[0][3] = LittleFloat(decoupledlm->lmvecs[0][3]);
 			out->lmvecs[1][0] = LittleFloat(decoupledlm->lmvecs[1][0]);
 			out->lmvecs[1][1] = LittleFloat(decoupledlm->lmvecs[1][1]);
 			out->lmvecs[1][2] = LittleFloat(decoupledlm->lmvecs[1][2]);
-			out->lmvecs[1][3] = LittleFloat(decoupledlm->lmvecs[1][3]) + 0.5f; //sigh
+			out->lmvecs[1][3] = LittleFloat(decoupledlm->lmvecs[1][3]);
 			out->lmvecscale[0] = 1.0f/VectorLength(out->lmvecs[0]);	//luxels->qu
 			out->lmvecscale[1] = 1.0f/VectorLength(out->lmvecs[1]);
 			decoupledlm++;
@@ -2849,6 +2849,8 @@ visdone:
 // set up the submodels (FIXME: this is confusing)
 //
 
+	mod->submodelof = loadmodel;
+
 	// johnfitz -- okay, so that i stop getting confused every time i look at this loop, here's how it works:
 	// we're looping through the submodels starting at 0.  Submodel 0 is the main model, so we don't have to
 	// worry about clobbering data the first time through, since it's the same data.  At the end of the loop,
@@ -2869,6 +2871,8 @@ visdone:
 
 		mod->firstmodelsurface = bm->firstface;
 		mod->nummodelsurfaces = bm->numfaces;
+		mod->submodelof = loadmodel->submodelof;
+		mod->submodelidx = i;
 
 		VectorCopy (bm->maxs, mod->maxs);
 		VectorCopy (bm->mins, mod->mins);

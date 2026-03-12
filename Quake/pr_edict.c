@@ -976,6 +976,8 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 					SV_Precache_Model(PR_GetString(ED_NewString(com_token)));
 				else if (!strcmp(keyname, "_precache_sound") && sv.state == ss_loading)
 					SV_Precache_Sound(PR_GetString(ED_NewString(com_token)));
+				else if (!strcmp(keyname, "_skyroom") && ent == sv.qcvm.edicts)
+					SV_SetupSkyRoom(com_token);
 			}
 			//spike
 			continue;
@@ -1018,7 +1020,9 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 			//johnfitz -- HACK -- suppress error becuase fog/sky/alpha fields might not be mentioned in defs.qc
 			else
 #endif
-				if (strncmp(keyname, "sky", 3) && strcmp(keyname, "fog") && strcmp(keyname, "alpha"))
+			if (!strcmp(keyname, "skyroom") && ent == sv.qcvm.edicts)
+				SV_SetupSkyRoom(com_token); //*barf* mapper should have used a leading underscore. hack around their bugs.
+			else if (strncmp(keyname, "sky", 3) && strcmp(keyname, "fog") && strcmp(keyname, "alpha"))
 				Con_DPrintf ("\"%s\" is not a field\n", keyname); //johnfitz -- was Con_Printf
 			continue;
 		}
@@ -1194,6 +1198,7 @@ static void PR_MergeEngineFieldDefs (void)
 		{"alpha",			ev_float},	//just because we can (though its already handled in a weird hacky way)
 		{"scale",			ev_float},	//hurrah for being able to rescale entities.
 		{"emiteffectnum",	ev_float},	//constantly emitting particles, even without moving.
+		{"pvsflags",		ev_float},	//extra controls to enable/disable pvs checks on ents.
 		{"traileffectnum",	ev_float},	//custom effect for trails
 		//{"glow_size",		ev_float},	//deprecated particle trail rubbish
 		//{"glow_color",	ev_float},	//deprecated particle trail rubbish

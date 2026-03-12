@@ -113,6 +113,7 @@ qboolean gl_glsl_gamma_able = false; //ericw
 qboolean gl_glsl_alias_able = false; //ericw
 qboolean gl_glsl_water_able = false; //Spoike
 int gl_stencilbits;
+GLint gl_hardware_maxsize;
 
 PFNGLMULTITEXCOORD2FARBPROC GL_MTexCoord2fFunc = NULL; //johnfitz
 PFNGLACTIVETEXTUREARBPROC GL_SelectTextureFunc = NULL; //johnfitz
@@ -122,6 +123,10 @@ PFNGLBUFFERDATAARBPROC GL_BufferDataFunc = NULL; //ericw
 PFNGLBUFFERSUBDATAARBPROC GL_BufferSubDataFunc = NULL; //ericw
 PFNGLDELETEBUFFERSARBPROC GL_DeleteBuffersFunc = NULL; //ericw
 PFNGLGENBUFFERSARBPROC GL_GenBuffersFunc = NULL; //ericw
+PFNGLMAPBUFFERARBPROC	GL_MapBufferFunc		= NULL; //spike
+PFNGLUNMAPBUFFERARBPROC	GL_UnmapBufferFunc		= NULL; //spike
+PFNGLMAPBUFFERRANGEPROC	GL_MapBufferRangeFunc	= NULL;	//spike
+PFNGLBUFFERSTORAGEPROC	GL_BufferStorageFunc	= NULL;	//spike
 
 QS_PFNGLCREATESHADERPROC GL_CreateShaderFunc = NULL; //ericw
 QS_PFNGLDELETESHADERPROC GL_DeleteShaderFunc = NULL; //ericw
@@ -670,12 +675,17 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, int bpp, qb
 			Sys_Error("Couldn't set fullscreen state mode");
 	}
 
-	/* Set window size and display mode */
-	SDL_SetWindowSize (draw_context, width, height);
-	if (previous_display >= 0)
-		SDL_SetWindowPosition (draw_context, SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display), SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display));
+	if (SDL_GetWindowFlags(draw_context) & SDL_WINDOW_MAXIMIZED)
+		;	//don't resize/move it when already maximised. this avoids sdl2 bugs.
 	else
-		SDL_SetWindowPosition(draw_context, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	{
+		/* Set window size and display mode */
+		SDL_SetWindowSize (draw_context, width, height);
+		if (previous_display >= 0)
+			SDL_SetWindowPosition (draw_context, SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display), SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display));
+		else
+			SDL_SetWindowPosition(draw_context, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	}
 	SDL_SetWindowDisplayMode (draw_context, VID_SDL2_GetDisplayMode(width, height, refreshrate, bpp));
 	SDL_SetWindowBordered (draw_context, vid_borderless.value ? SDL_FALSE : SDL_TRUE);
 
@@ -702,6 +712,7 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, int bpp, qb
 	if (SDL_GL_SetSwapInterval ((vid_vsync.value) ? 1 : 0) == -1)
 		gl_swap_control = false;
 
+	SDL_GL_GetDrawableSize(draw_context, &vid.width, &vid.height);
 #else /* !defined(USE_SDL2) */
 
 	flags = DEFAULT_SDL_FLAGS;
@@ -734,10 +745,11 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, int bpp, qb
 	}
 
 	SDL_WM_SetCaption(caption, caption);
-#endif /* !defined(USE_SDL2) */
 
 	vid.width = VID_GetCurrentWidth();
 	vid.height = VID_GetCurrentHeight();
+#endif /* !defined(USE_SDL2) */
+
 	vid.conwidth = vid.width & 0xFFFFFFF8;
 	vid.conheight = vid.conwidth * vid.height / vid.width;
 	vid.numpages = 2;
@@ -825,6 +837,7 @@ static void VID_Restart (void)
 // one of the new objects could be given the same ID as an invalid handle
 // which is later deleted.
 
+	RSceneCache_Shutdown();
 	TexMgr_DeleteTextureObjects ();
 	GLSLGamma_DeleteTexture ();
 	R_ScaleView_DeleteTexture ();
@@ -1004,6 +1017,8 @@ static void GL_CheckExtensions (void)
 		GL_BufferSubDataFunc = (PFNGLBUFFERSUBDATAARBPROC) SDL_GL_GetProcAddress("glBufferSubDataARB");
 		GL_DeleteBuffersFunc = (PFNGLDELETEBUFFERSARBPROC) SDL_GL_GetProcAddress("glDeleteBuffersARB");
 		GL_GenBuffersFunc = (PFNGLGENBUFFERSARBPROC) SDL_GL_GetProcAddress("glGenBuffersARB");
+		GL_MapBufferFunc = (PFNGLMAPBUFFERARBPROC) SDL_GL_GetProcAddress("glMapBufferARB");	//spike -- grab these too.
+		GL_UnmapBufferFunc = (PFNGLUNMAPBUFFERARBPROC) SDL_GL_GetProcAddress("glUnmapBufferARB");
 		if (GL_BindBufferFunc && GL_BufferDataFunc && GL_BufferSubDataFunc && GL_DeleteBuffersFunc && GL_GenBuffersFunc)
 		{
 			Con_Printf("FOUND: ARB_vertex_buffer_object\n");
@@ -1013,6 +1028,21 @@ static void GL_CheckExtensions (void)
 		{
 			Con_Warning ("ARB_vertex_buffer_object not available\n");
 		}
+	}
+
+	if (gl_version_major > 4 || (gl_version_major == 4 && gl_version_minor >= 4) || GL_ParseExtensionList(gl_extensions, "GL_ARB_buffer_storage"))
+	{
+		GL_MapBufferRangeFunc = (PFNGLMAPBUFFERRANGEPROC) SDL_GL_GetProcAddress("glMapBufferRange");
+		GL_BufferStorageFunc = (PFNGLBUFFERSTORAGEPROC) SDL_GL_GetProcAddress("glBufferStorage");
+		if (gl_vbo_able && GL_MapBufferRangeFunc && GL_BufferStorageFunc)
+			Con_Printf("FOUND: GL_ARB_buffer_storage\n");
+		else
+			Con_Warning ("GL_ARB_buffer_storage not available\n");	//doesn't really warrent a warning, but when in rome...
+	}
+	else
+	{
+		GL_MapBufferRangeFunc = NULL;
+		GL_BufferStorageFunc = NULL;
 	}
 
 	// multitexture
@@ -1393,6 +1423,11 @@ static void GL_Init (void)
 	}
 	//johnfitz
 
+	// query max size from hardware
+	glGetIntegerv (GL_MAX_TEXTURE_SIZE, &gl_hardware_maxsize);
+	LMBLOCK_WIDTH = q_min(gl_hardware_maxsize, 512);	//keeping this small potentially allows for more efficient texsubimage calls.
+	LMBLOCK_HEIGHT = q_min(gl_hardware_maxsize, 16384);
+
 	GLAlias_CreateShaders ();
 	GLWorld_CreateShaders ();
 	GL_ClearBufferBindings ();
@@ -1635,7 +1670,9 @@ void	VID_Init (void)
 	int		p, width, height, refreshrate, bpp;
 	int		display_width, display_height, display_refreshrate, display_bpp;
 	qboolean	fullscreen;
-	const char	*read_vars[] = { "vid_fullscreen",
+	cvar_t *v;
+	size_t i;
+	static const char	*read_vars[] = { "vid_fullscreen",
 					 "vid_width",
 					 "vid_height",
 					 "vid_refreshrate",
@@ -1643,7 +1680,9 @@ void	VID_Init (void)
 					 "vid_vsync",
 					 "vid_fsaa",
 					 "vid_desktopfullscreen",
-					 "vid_borderless"};
+					 "vid_borderless",
+					 "gl_load24bit",	//including this here so we don't start up to the wrong setting.
+					 };
 #define num_readvars	( sizeof(read_vars)/sizeof(read_vars[0]) )
 
 	Cvar_RegisterVariable (&vid_fullscreen); //johnfitz
@@ -1655,15 +1694,14 @@ void	VID_Init (void)
 	Cvar_RegisterVariable (&vid_fsaa); //QuakeSpasm
 	Cvar_RegisterVariable (&vid_desktopfullscreen); //QuakeSpasm
 	Cvar_RegisterVariable (&vid_borderless); //QuakeSpasm
-	Cvar_SetCallback (&vid_fullscreen, VID_Changed_f);
-	Cvar_SetCallback (&vid_width, VID_Changed_f);
-	Cvar_SetCallback (&vid_height, VID_Changed_f);
-	Cvar_SetCallback (&vid_refreshrate, VID_Changed_f);
-	Cvar_SetCallback (&vid_bpp, VID_Changed_f);
-	Cvar_SetCallback (&vid_vsync, VID_Changed_f);
-	Cvar_SetCallback (&vid_fsaa, VID_FSAA_f);
-	Cvar_SetCallback (&vid_desktopfullscreen, VID_Changed_f);
-	Cvar_SetCallback (&vid_borderless, VID_Changed_f);
+	for (i = 0; i < num_readvars; i++)
+	{
+		v = Cvar_FindVar(read_vars[i]);
+		if (!v || v->callback)
+			Sys_Error("Cvar %s not found yet, or already has a callback", read_vars[i]);
+		else
+			Cvar_SetCallback (v, VID_Changed_f);
+	}
 
 	Cmd_AddCommand ("vid_unlock", VID_Unlock); //johnfitz
 	Cmd_AddCommand ("vid_restart", VID_Restart); //johnfitz

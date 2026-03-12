@@ -31,7 +31,6 @@ static cvar_t	gl_texturemode = {"gl_texturemode", "", CVAR_ARCHIVE};
 static cvar_t	gl_texture_anisotropy = {"gl_texture_anisotropy", "1", CVAR_ARCHIVE};
 static cvar_t	gl_max_size = {"gl_max_size", "0", CVAR_NONE};
 static cvar_t	gl_picmip = {"gl_picmip", "0", CVAR_NONE};
-static GLint	gl_hardware_maxsize;
 
 static int numgltextures;
 static gltexture_t	*active_gltextures, *free_gltextures;
@@ -704,9 +703,6 @@ void TexMgr_Init (void)
 	Cmd_AddCommand ("gl_describetexturemodes", &TexMgr_DescribeTextureModes_f);
 	Cmd_AddCommand ("imagelist", &TexMgr_Imagelist_f);
 	Cmd_AddCommand ("imagedump", &TexMgr_Imagedump_f);
-
-	// poll max size from hardware
-	glGetIntegerv (GL_MAX_TEXTURE_SIZE, &gl_hardware_maxsize);
 
 	// load notexture images
 	notexture = TexMgr_LoadImage (NULL, "notexture", 2, 2, SRC_RGBA, notexture_data, "", (src_offset_t)notexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP);
@@ -1507,7 +1503,7 @@ gltexture_t *TexMgr_LoadImage (qmodel_t *owner, const char *name, int width, int
 		return NULL;
 
 	// cache check
-	if (format == SRC_EXTERNAL)
+	if (format == SRC_EXTERNAL || format == SRC_LIGHTMAP)
 		crc = 0;
 	else
 		crc = CRC_Block(data, TexMgr_ImageSize(width, height, format));

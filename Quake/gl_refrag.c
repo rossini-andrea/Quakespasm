@@ -165,7 +165,7 @@ void R_CheckEfrags (void)
 R_AddEfrags
 ===========
 */
-void R_AddEfrags (entity_t *ent)
+static void R_AddEfrags (entity_t *ent)
 {
 	qmodel_t	*entmodel;
 	float scale;
@@ -266,3 +266,79 @@ void R_StoreEfrags (efrag_t **ppefrag)
 	}
 }
 
+
+static void R_FindTouchedLeafs (struct cl_static_entities_s *ent, mnode_t *node)
+{
+	mplane_t	*splitplane;
+	mleaf_t		*leaf;
+	int			sides;
+	int			clusternum;
+
+	if (node->contents == CONTENTS_SOLID)
+		return;
+
+// add an efrag if the node is a leaf
+
+	if ( node->contents < 0)
+	{
+		if (ent->num_clusters < MAX_ENT_LEAFS)
+		{
+			leaf = (mleaf_t *)node;
+			clusternum = (leaf - cl.worldmodel->leafs) - 1;
+			ent->clusternums[ent->num_clusters] = clusternum;
+		}
+		ent->num_clusters++;
+		return;
+	}
+
+// NODE_MIXED
+
+	splitplane = node->plane;
+	sides = BOX_ON_PLANE_SIDE(ent->absmin, ent->absmax, splitplane);
+
+// recurse down the contacted sides
+	if (sides & 1)
+		R_FindTouchedLeafs (ent, node->children[0]);
+
+	if (sides & 2)
+		R_FindTouchedLeafs (ent, node->children[1]);
+}
+
+void CL_LinkStaticEnt(struct cl_static_entities_s *ent)
+{
+	ent->num_clusters = 0;
+	if (!ent->ent->model)
+		return;
+
+	//calc its bbox...
+	if (ent->ent->angles[0] || ent->ent->angles[1] || ent->ent->angles[2])
+	{	// expand for rotation the lame way. hopefully there's an origin brush in there.
+		int i;
+		float v1,v2;
+		vec3_t max;
+		//q2 method
+		for (i=0 ; i<3 ; i++)
+		{
+			v1 = fabs(ent->ent->model->mins[i]);
+			v2 = fabs(ent->ent->model->maxs[i]);
+			max[i] = q_max(v1,v2);
+		}
+		v1 = sqrt(DotProduct(max,max));
+		for (i=0 ; i<3 ; i++)
+		{
+			ent->absmin[i] = ent->ent->origin[i] - v1;
+			ent->absmax[i] = ent->ent->origin[i] + v1;
+		}
+	}
+	else
+	{	//simple
+		VectorAdd(ent->ent->origin, ent->ent->model->mins, ent->absmin);
+		VectorAdd(ent->ent->origin, ent->ent->model->maxs, ent->absmax);
+	}
+
+	//for scenecache
+	R_FindTouchedLeafs(ent, cl.worldmodel->nodes);
+
+	//legacy bloat for non-scenecache.
+	R_AddEfrags(ent->ent);
+}

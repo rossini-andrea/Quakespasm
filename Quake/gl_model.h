@@ -115,6 +115,7 @@ typedef struct
 	float		vecs[2][4];
 	texture_t	*texture;
 	int			flags;
+	int			materialidx;
 } mtexinfo_t;
 
 #define	VERTEXSIZE	7
@@ -495,6 +496,8 @@ typedef struct qmodel_s
 
 	int			numsubmodels;
 	mmodel_t	*submodels;
+	struct qmodel_s	*submodelof;
+	unsigned	submodelidx;
 
 	int			numplanes;
 	mplane_t	*planes;

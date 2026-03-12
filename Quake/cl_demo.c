@@ -255,7 +255,7 @@ void CL_Record_Prespawn(void)
 	//static ents
 	for (idx = 1; idx < cl.num_statics; idx++)
 	{
-		MSG_WriteStaticOrBaseLine(&net_message, -1, &cl.static_entities[idx]->baseline, cl.protocol_pext2, cl.protocol, cl.protocolflags);
+		MSG_WriteStaticOrBaseLine(&net_message, -1, &cl.static_entities[idx].ent->baseline, cl.protocol_pext2, cl.protocol, cl.protocolflags);
 
 		if (net_message.cursize > 4096)
 		{	//periodically flush so that large maps don't need larger than vanilla limits

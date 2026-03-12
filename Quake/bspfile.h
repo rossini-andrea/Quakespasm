@@ -239,7 +239,7 @@ typedef struct texinfo_s
 {
 	float		vecs[2][4];		// [s/t][xyz offset]
 	int			miptex;
-	int			flags;
+	int			flags;	//TEX_SPECIAL
 } texinfo_t;
 #define	TEX_SPECIAL		1		// sky or slime, no lightmap or 256 subdivision
 #define TEX_MISSING		2		// johnfitz -- this texinfo does not have a texture

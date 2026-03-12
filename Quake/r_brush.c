@@ -31,14 +31,14 @@ extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 int		gl_lightmap_format;
 int		lightmap_bytes;
 qboolean lightmaps_latecached;
+qboolean lightmaps_skipupdates;
 
 #define MAX_SANITY_LIGHTMAPS (1u<<20)
 struct lightmap_s	*lightmaps;
 int					lightmap_count;
-int					last_lightmap_allocated;
-int					allocated[LMBLOCK_WIDTH];
-
-unsigned	blocklights[LMBLOCK_WIDTH*LMBLOCK_HEIGHT*3]; //johnfitz -- was 18*18, added lit support (*3) and loosened surface extents maximum (LMBLOCK_WIDTH*LMBLOCK_HEIGHT)
+static int			last_lightmap_allocated;
+static int			*allocated;
+int LMBLOCK_WIDTH, LMBLOCK_HEIGHT;
 
 
 /*
@@ -510,6 +510,12 @@ void R_DrawBrushModel (entity_t *e)
 	mplane_t	*pplane;
 	qmodel_t	*clmodel;
 	vec3_t		lightorg;
+	extern byte *skipsubmodels;
+
+	if (e->model->submodelof == cl.worldmodel &&
+		skipsubmodels &&
+		skipsubmodels[e->model->submodelidx>>3]&(1u<<(e->model->submodelidx&7)))
+		return;	//its in the scenecache that we're drawing. don't draw it twice (and certainly not the slow way).
 
 	if (R_CullModelForEntity(e))
 		return;
@@ -535,6 +541,7 @@ void R_DrawBrushModel (entity_t *e)
 // calculate dynamic lighting for bmodel if it's not an
 // instanced model
 	if (clmodel->firstmodelsurface != 0 && !gl_flashblend.value)
+	if (e->model->submodelof == cl.worldmodel)	//R_MarkLights has a hacky assumption about cl.worldmodel that could crash if we imported some other model.
 	{
 		for (k=0 ; k<MAX_DLIGHTS ; k++)
 		{
@@ -543,7 +550,7 @@ void R_DrawBrushModel (entity_t *e)
 				continue;
 
 			VectorSubtract(cl_dlights[k].origin, e->origin, lightorg);
-			R_MarkLights (&cl_dlights[k], lightorg, k,
+			R_MarkLights (&cl_dlights[k], lightorg, r_framecount, k,
 				clmodel->nodes + clmodel->hulls[0].firstclipnode);
 		}
 	}
@@ -704,9 +711,9 @@ dynamic:
 				theRect->w = (fa->light_s-theRect->l)+smax;
 			if ((theRect->h + theRect->t) < (fa->light_t + tmax))
 				theRect->h = (fa->light_t-theRect->t)+tmax;
-			base = lm->data;
+			base = lm->pbodata;
 			base += fa->light_t * LMBLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-			R_BuildLightMap (model, fa, base, LMBLOCK_WIDTH*lightmap_bytes);
+			R_BuildLightMap (model, fa, base, LMBLOCK_WIDTH*lightmap_bytes, currententity, r_framecount, cl_dlights);
 		}
 	}
 }
@@ -734,9 +741,18 @@ int AllocBlock (int w, int h, int *x, int *y)
 			lightmap_count++;
 			lightmaps = (struct lightmap_s *) realloc(lightmaps, sizeof(*lightmaps)*lightmap_count);
 			memset(&lightmaps[texnum], 0, sizeof(lightmaps[texnum]));
-			lightmaps[texnum].data = (byte *) calloc(1, 4*LMBLOCK_WIDTH*LMBLOCK_HEIGHT);
+			if (GL_BufferStorageFunc)
+			{	//if we have bufferstorage then we have mapbufferrange+persistent+coherent
+				GL_GenBuffersFunc(1, &lightmaps[texnum].pbohandle);
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, lightmaps[texnum].pbohandle);
+				GL_BufferStorageFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 4*LMBLOCK_WIDTH*LMBLOCK_HEIGHT, NULL, GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT|GL_CLIENT_STORAGE_BIT);
+				lightmaps[texnum].pbodata = GL_MapBufferRangeFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0, 4*LMBLOCK_WIDTH*LMBLOCK_HEIGHT, GL_MAP_WRITE_BIT|GL_MAP_PERSISTENT_BIT|GL_MAP_COHERENT_BIT);
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+			}
+			else
+				lightmaps[texnum].pbodata = (byte *) calloc(1, 4*LMBLOCK_WIDTH*LMBLOCK_HEIGHT);
 			//as we're only tracking one texture, we don't need multiple copies of allocated any more.
-			memset(allocated, 0, sizeof(allocated));
+			memset(allocated, 0, sizeof(*allocated)*LMBLOCK_WIDTH);
 
 			lightmaps[texnum].modified = true;
 			lightmaps[texnum].rectchange.l = 0;
@@ -804,9 +820,9 @@ void GL_CreateSurfaceLightmap (qmodel_t *model, msurface_t *surf)
 	tmax = surf->extents[1]+1;
 
 	surf->lightmaptexturenum = AllocBlock (smax, tmax, &surf->light_s, &surf->light_t);
-	base = lightmaps[surf->lightmaptexturenum].data;
+	base = lightmaps[surf->lightmaptexturenum].pbodata;
 	base += (surf->light_t * LMBLOCK_WIDTH + surf->light_s) * lightmap_bytes;
-	R_BuildLightMap (model, surf, base, LMBLOCK_WIDTH*lightmap_bytes);
+	R_BuildLightMap (model, surf, base, LMBLOCK_WIDTH*lightmap_bytes, currententity, r_framecount, cl_dlights);
 }
 
 /*
@@ -879,11 +895,11 @@ static void BuildSurfaceDisplayList (msurface_t *fa)
 		//
 		// lightmap texture coordinates
 		//
-		s = DotProduct (vec, fa->lmvecs[0]) + fa->lmvecs[0][3];
+		s = DotProduct (vec, fa->lmvecs[0]) + fa->lmvecs[0][3] + 0.5;
 		s += fa->light_s;
 		s /= LMBLOCK_WIDTH;
 
-		t = DotProduct (vec, fa->lmvecs[1]) + fa->lmvecs[1][3];
+		t = DotProduct (vec, fa->lmvecs[1]) + fa->lmvecs[1][3] + 0.5;
 		t += fa->light_t;
 		t /= LMBLOCK_HEIGHT;
 
@@ -936,6 +952,8 @@ void GL_BuildLightmaps (void)
 	struct lightmap_s *lm;
 	qmodel_t	*m;
 
+	RSceneCache_Shutdown();	//make sure there's nothing poking them off-thread.
+
 	r_framecount = 1; // no dlightcache
 
 	//Spike -- wipe out all the lightmap data (johnfitz -- the gltexture objects were already freed by Mod_ClearAll)
@@ -943,12 +961,21 @@ void GL_BuildLightmaps (void)
 	{
 		if (lightmaps[i].texture)
 			TexMgr_FreeTexture(lightmaps[i].texture);
-		free(lightmaps[i].data);
+		if (lightmaps[i].pbohandle)
+		{
+			GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, lightmaps[i].pbohandle);
+			GL_UnmapBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB);
+			GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+			GL_DeleteBuffersFunc(1, &lightmaps[i].pbohandle);
+		}
+		else
+			free(lightmaps[i].pbodata);
 	}
 	free(lightmaps);
 	lightmaps = NULL;
 	last_lightmap_allocated = 0;
 	lightmap_count = 0;
+	allocated = realloc(allocated, sizeof(*allocated)*LMBLOCK_WIDTH);
 
 	if (gl_texture_e5bgr9)// && cl.worldmodel && (cl.worldmodel->flags&MOD_HDRLIGHTING))
 		gl_lightmap_format = GL_RGB9_E5; //requires gl3, allowing for hdr lighting.
@@ -999,8 +1026,19 @@ void GL_BuildLightmaps (void)
 
 		//johnfitz -- use texture manager
 		sprintf(name, "lightmap%07i",i);
-		lm->texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
-						SRC_LIGHTMAP, lm->data, "", (src_offset_t)lm->data, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+
+		if (lm->pbohandle)
+		{
+			GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, lm->pbohandle);
+			lm->texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
+							SRC_LIGHTMAP, NULL, "", (src_offset_t)lm->pbodata, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+			GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+		}
+		else
+		{
+			lm->texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
+					SRC_LIGHTMAP, lm->pbodata, "", (src_offset_t)lm->pbodata, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+		}
 		//johnfitz
 	}
 
@@ -1129,7 +1167,7 @@ void GL_BuildBModelVertexBuffer (void)
 R_AddDynamicLights
 ===============
 */
-void R_AddDynamicLights (msurface_t *surf)
+static void R_AddDynamicLights (msurface_t *surf, unsigned *blocklights, entity_t *currentent, dlight_t *lights)
 {
 	int			lnum;
 	int			sd, td;
@@ -1152,11 +1190,21 @@ void R_AddDynamicLights (msurface_t *surf)
 		if (! (surf->dlightbits[lnum >> 5] & (1U << (lnum & 31))))
 			continue;		// not lit by this light
 
-		rad = cl_dlights[lnum].radius;
-		VectorSubtract(cl_dlights[lnum].origin, currententity->origin, lightofs);
+		rad = lights[lnum].radius;
+		if (currentent->currentangles[0] || currentent->currentangles[1] || currentent->currentangles[2])
+		{
+			vec3_t temp, axis[3];
+			VectorSubtract(lights[lnum].origin, currentent->origin, temp);
+			AngleVectors(currentent->currentangles, axis[0], axis[1], axis[2]);
+			lightofs[0] = +DotProduct(temp, axis[0]);
+			lightofs[1] = -DotProduct(temp, axis[1]);
+			lightofs[2] = +DotProduct(temp, axis[2]);
+		}
+		else
+			VectorSubtract(lights[lnum].origin, currentent->origin, lightofs);
 		dist = DotProduct (lightofs, surf->plane->normal) - surf->plane->dist;
 		rad -= fabs(dist);
-		minlight = cl_dlights[lnum].minlight;
+		minlight = lights[lnum].minlight;
 		if (rad < minlight)
 			continue;
 		minlight = rad - minlight;
@@ -1172,9 +1220,9 @@ void R_AddDynamicLights (msurface_t *surf)
 
 		//johnfitz -- lit support via lordhavoc
 		bl = blocklights;
-		cred = cl_dlights[lnum].color[0] * 256.0f;
-		cgreen = cl_dlights[lnum].color[1] * 256.0f;
-		cblue = cl_dlights[lnum].color[2] * 256.0f;
+		cred = lights[lnum].color[0] * 256.0f;
+		cgreen = lights[lnum].color[1] * 256.0f;
+		cblue = lights[lnum].color[2] * 256.0f;
 		//johnfitz
 		for (t = 0 ; t<tmax ; t++)
 		{
@@ -1213,7 +1261,7 @@ R_BuildLightMap -- johnfitz -- revised for lit support via lordhavoc
 Combine and scale multiple lightmaps into the 8.8 format in blocklights
 ===============
 */
-void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
+void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride, entity_t *currentent, int framecount, dlight_t *lights)
 {
 	int			smax, tmax;
 	int			r,g,b;
@@ -1221,12 +1269,15 @@ void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
 	unsigned	scale;
 	int			maps;
 	unsigned	*bl;
+	unsigned	*blocklights;	//moved this to stack, so workers working on the worldmodel won't fight the main thread processing the submodels.
 
-	surf->cached_dlight = (surf->dlightframe == r_framecount);
+	surf->cached_dlight = (surf->dlightframe == framecount);
 
 	smax = surf->extents[0]+1;
 	tmax = surf->extents[1]+1;
 	size = smax*tmax;
+
+	blocklights = alloca(size*3*sizeof(*blocklights));	//alloca is unsafe, but at least we memset it... should probably memset in stack order in the hopes of getting a standard stack-overflow-segfault instead of poking completely outside what the system thinks is the stack in the case of massive surfs...
 
 	if (model->lightdata)
 	{
@@ -1283,13 +1334,14 @@ void R_BuildLightMap (qmodel_t *model, msurface_t *surf, byte *dest, int stride)
 		}
 
 	// add all the dynamic lights
-		if (surf->dlightframe == r_framecount)
-			R_AddDynamicLights (surf);
+		if (surf->dlightframe == framecount)
+			R_AddDynamicLights (surf, blocklights, currentent, lights);
 	}
 	else
 	{
 	// set to full bright if no light data
-		memset (&blocklights[0], 255, size * 3 * sizeof (unsigned int)); //johnfitz -- lit support via lordhavoc
+		for (i=0 ; i<size ; i++)
+			blocklights[i] = 0xffff;	//don't use memset, it oversaturates FAR too much with hdr...
 	}
 
 // bound, invert, and shift
@@ -1404,12 +1456,26 @@ static void R_UploadLightmap(int lmap)
 
 	lm->modified = false;
 
-	if (gl_lightmap_format == GL_RGB9_E5)
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, GL_RGB,
-				GL_UNSIGNED_INT_5_9_9_9_REV, lm->data+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+	if (lm->pbohandle)
+	{
+		GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, lm->pbohandle);
+		if (gl_lightmap_format == GL_RGB9_E5)
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, GL_RGB,
+					GL_UNSIGNED_INT_5_9_9_9_REV, (byte*)NULL+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+		else
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, gl_lightmap_format,
+					GL_UNSIGNED_BYTE, (byte*)NULL+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+		GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+	}
 	else
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, gl_lightmap_format,
-				GL_UNSIGNED_BYTE, lm->data+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+	{
+		if (gl_lightmap_format == GL_RGB9_E5)
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, GL_RGB,
+					GL_UNSIGNED_INT_5_9_9_9_REV, lm->pbodata+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+		else
+			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, lm->rectchange.t, LMBLOCK_WIDTH, lm->rectchange.h, gl_lightmap_format,
+					GL_UNSIGNED_BYTE, lm->pbodata+lm->rectchange.t*LMBLOCK_WIDTH*lightmap_bytes);
+	}
 	lm->rectchange.l = LMBLOCK_WIDTH;
 	lm->rectchange.t = LMBLOCK_HEIGHT;
 	lm->rectchange.h = 0;
@@ -1429,6 +1495,9 @@ void R_UploadLightmaps (void)
 		lightmaps_latecached=false;
 	}
 
+	if (lightmaps_skipupdates)
+		return;
+
 	for (lmap = 0; lmap < lightmap_count; lmap++)
 	{
 		if (!lightmaps[lmap].modified)
@@ -1438,9 +1507,18 @@ void R_UploadLightmaps (void)
 		{
 			char	name[24];
 			sprintf(name, "lightmap%07i",lmap);
-			lightmaps[lmap].texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
-							SRC_LIGHTMAP, lightmaps[lmap].data, "", (src_offset_t)lightmaps[lmap].data, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
-
+			if (lightmaps[lmap].pbohandle)
+			{
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, lightmaps[lmap].pbohandle);
+				lightmaps[lmap].texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
+								SRC_LIGHTMAP, NULL, "", (src_offset_t)lightmaps[lmap].pbodata, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+			}
+			else
+			{
+				lightmaps[lmap].texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
+								SRC_LIGHTMAP, lightmaps[lmap].pbodata, "", (src_offset_t)lightmaps[lmap].pbodata, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+			}
 			lightmaps[lmap].modified = false;
 			lightmaps[lmap].rectchange.l = LMBLOCK_WIDTH;
 			lightmaps[lmap].rectchange.t = LMBLOCK_HEIGHT;
@@ -1480,9 +1558,9 @@ void R_RebuildAllLightmaps (void)
 		{
 			if (fa->flags & SURF_DRAWTILED)
 				continue;
-			base = lightmaps[fa->lightmaptexturenum].data;
+			base = lightmaps[fa->lightmaptexturenum].pbodata;
 			base += fa->light_t * LMBLOCK_WIDTH * lightmap_bytes + fa->light_s * lightmap_bytes;
-			R_BuildLightMap (mod, fa, base, LMBLOCK_WIDTH*lightmap_bytes);
+			R_BuildLightMap (mod, fa, base, LMBLOCK_WIDTH*lightmap_bytes, currententity, r_framecount, cl_dlights);
 		}
 	}
 
@@ -1493,18 +1571,42 @@ void R_RebuildAllLightmaps (void)
 		{
 			char	name[24];
 			sprintf(name, "lightmap%07i",i);
-			lightmaps[i].texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
-							SRC_LIGHTMAP, lightmaps[i].data, "", (src_offset_t)lightmaps[i].data, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+			if (lightmaps[i].pbohandle)
+			{
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, lightmaps[i].pbohandle);
+				lightmaps[i].texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
+								SRC_LIGHTMAP, NULL, "", (src_offset_t)lightmaps[i].pbodata, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+			}
+			else
+			{
+				lightmaps[i].texture = TexMgr_LoadImage (NULL, name, LMBLOCK_WIDTH, LMBLOCK_HEIGHT,
+								SRC_LIGHTMAP, lightmaps[i].pbodata, "", (src_offset_t)lightmaps[i].pbodata, TEXPREF_LINEAR | TEXPREF_NOPICMIP | TEXPREF_PERSIST);
+			}
 		}
 		else
 		{
 			GL_Bind (lightmaps[i].texture);
-			if (gl_lightmap_format == GL_RGB9_E5)
-				glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, GL_RGB,
-						GL_UNSIGNED_INT_5_9_9_9_REV, lightmaps[i].data);
+			if (lightmaps[i].pbohandle)
+			{
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, lightmaps[i].pbohandle);
+				if (gl_lightmap_format == GL_RGB9_E5)
+					glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, GL_RGB,
+							GL_UNSIGNED_INT_5_9_9_9_REV, NULL);
+				else
+					glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, gl_lightmap_format,
+							GL_UNSIGNED_BYTE, NULL);
+				GL_BindBufferFunc(GL_PIXEL_UNPACK_BUFFER_ARB, 0);
+			}
 			else
-				glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, gl_lightmap_format,
-						GL_UNSIGNED_BYTE, lightmaps[i].data);
+			{
+				if (gl_lightmap_format == GL_RGB9_E5)
+					glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, GL_RGB,
+							GL_UNSIGNED_INT_5_9_9_9_REV, lightmaps[i].pbodata);
+				else
+					glTexSubImage2D (GL_TEXTURE_2D, 0, 0, 0, LMBLOCK_WIDTH, LMBLOCK_HEIGHT, gl_lightmap_format,
+							GL_UNSIGNED_BYTE, lightmaps[i].pbodata);
+			}
 		}
 
 		lightmaps[i].modified = false;

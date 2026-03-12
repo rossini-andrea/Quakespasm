@@ -91,5 +91,8 @@ char *PL_GetClipboardData (void)
 
 void PL_ErrorDialog (const char *errorMsg)
 {
+#if SDL_MAJOR_VERSION >= 2
+	SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Sys_Error", errorMsg, NULL);
+#endif
 }
 

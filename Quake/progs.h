@@ -159,7 +159,7 @@ eval_t *GetEdictFieldValue(edict_t *ed, int fldofs);	//handles invalid offsets w
 int ED_FindFieldOffset (const char *name);
 
 #define GetEdictFieldValid(fld) (qcvm->extfields.fld>=0)
-#define GetEdictFieldEval(ed,fld) ((eval_t *)((char *)&ed->v + qcvm->extfields.fld*4)) //caller must validate the field first
+#define GetEdictFieldEval(ed,fld) ((eval_t *)((float *)&ed->v + qcvm->extfields.fld)) //caller must validate the field first
 
 //from pr_cmds, no longer static so that pr_ext can use them.
 sizebuf_t *WriteDest (void);
@@ -324,6 +324,7 @@ struct pr_extfields_s
 	QCEXTFIELD(viewzoom,				".float")			/*float*/	\
 	QCEXTFIELD(SendEntity,				".float(entity to, float changedflags)")			/*function*/	\
 	QCEXTFIELD(SendFlags,				".float")			/*float. :( */	\
+	QCEXTFIELD(pvsflags,				".float")			/*float*/	\
 	//end of list
 
 #define QCEXTFIELD(n,t) int n;

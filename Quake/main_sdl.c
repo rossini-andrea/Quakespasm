@@ -136,7 +136,8 @@ int main(int argc, char *argv[])
 		/* If we have no input focus at all, sleep a bit */
 		if (!VID_HasMouseOrInputFocus() || cl.paused)
 		{
-			SDL_Delay(16);
+			if (sys_throttle.value >= 0)
+				SDL_Delay(16);
 		}
 		/* If we're minimised, sleep a bit more */
 		if (VID_IsMinimized())

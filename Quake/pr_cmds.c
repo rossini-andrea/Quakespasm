@@ -562,11 +562,17 @@ bug: vanilla could return 1, contrary to the (unchanged) comment just above.
 */
 static void PF_random (void)
 {
-	float		num;
+	//don't return 1 (it would break array[random()*array.length];
+	//don't return 0 either, it would break the self.nextthink = time+random()*foo; lines in walkmonster_start, resulting rarely in statue-monsters.
+	G_FLOAT(OFS_RETURN) = (rand ()&0x7fff) / ((float)0x08000) + (0.5/0x08000);
 
-	num = (rand() & 0x7fff) / ((float)0x8000);
-
-	G_FLOAT(OFS_RETURN) = num;
+	if (qcvm->argc)
+	{
+		if (qcvm->argc == 1)	//maximum value
+			G_FLOAT(OFS_RETURN) *= G_FLOAT(OFS_PARM0);
+		else // min and max.
+			G_FLOAT(OFS_RETURN) = G_FLOAT(OFS_PARM0) + G_FLOAT(OFS_RETURN)*(G_FLOAT(OFS_PARM1)-G_FLOAT(OFS_PARM0));
+	}
 }
 
 /*
@@ -1790,6 +1796,7 @@ void PR_spawnfunc_misc_model(edict_t *self)
 	//make sure the model is precached, to avoid errors.
 	G_INT(OFS_PARM0) = self->v.model;
 	PF_sv_precache_model();
+	self->v.modelindex = SV_ModelIndex(PR_GetString(self->v.model));
 
 	//and lets just call makestatic instead of worrying if it'll interfere with the rest of the qc.
 	G_INT(OFS_PARM0) = EDICT_TO_PROG(self);
@@ -2090,16 +2097,16 @@ static void PF_cl_makestatic (void)
 	if (i >= cl.max_static_entities)
 	{
 		int ec = 64;
-		entity_t **newstatics = realloc(cl.static_entities, sizeof(*newstatics) * (cl.max_static_entities+ec));
+		struct cl_static_entities_s *newstatics = realloc(cl.static_entities, sizeof(*newstatics) * (cl.max_static_entities+ec));
 		entity_t *newents = Hunk_Alloc(sizeof(*newents) * ec);
 		if (!newstatics || !newents)
 			Host_Error ("Too many static entities");
 		cl.static_entities = newstatics;
 		while (ec--)
-			cl.static_entities[cl.max_static_entities++] = newents++;
+			cl.static_entities[cl.max_static_entities++].ent = newents++;
 	}
 
-	stat = cl.static_entities[i];
+	stat = cl.static_entities[i].ent;
 	cl.num_statics++;
 
 	SV_BuildEntityState(NULL, ent, &stat->baseline);
@@ -2121,8 +2128,7 @@ static void PF_cl_makestatic (void)
 
 	VectorCopy (ent->baseline.origin, stat->origin);
 	VectorCopy (ent->baseline.angles, stat->angles);
-	if (stat->model)
-		R_AddEfrags (stat);
+	CL_LinkStaticEnt(&cl.static_entities[i]);
 
 // throw the entity away now
 	ED_Free (ent);

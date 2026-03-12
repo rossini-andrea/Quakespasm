@@ -123,7 +123,7 @@ void Sky_LoadTexture (qmodel_t *mod, texture_t *mt, enum srcformat fmt, unsigned
 		memcpy(back_data+bb*i*columns, src+bb*(i*columns*2 + columns), columns*bb);
 
 	q_snprintf(texturename, sizeof(texturename), "%s:%s_back", mod->name, mt->name);
-	solidskytexture = TexMgr_LoadImage (mod, texturename, width, height, fmt, back_data, "", (src_offset_t)back_data, TEXPREF_NONE);
+	mt->gltexture = solidskytexture = TexMgr_LoadImage (mod, texturename, width, height, fmt, back_data, "", (src_offset_t)back_data, TEXPREF_NONE);
 
 // extract front layer and upload
 	for (i=0 ; i<rows ; i++)
@@ -137,7 +137,7 @@ void Sky_LoadTexture (qmodel_t *mod, texture_t *mt, enum srcformat fmt, unsigned
 		}
 	}
 	q_snprintf(texturename, sizeof(texturename), "%s:%s_front", mod->name, mt->name);
-	alphaskytexture = TexMgr_LoadImage (mod, texturename, width, height, fmt, front_data, "", (src_offset_t)front_data, TEXPREF_ALPHA);
+	mt->fullbright = alphaskytexture = TexMgr_LoadImage (mod, texturename, width, height, fmt, front_data, "", (src_offset_t)front_data, TEXPREF_ALPHA);
 
 // calculate r_fastsky color based on average of all opaque foreground colors, if we can.
 	r = g = b = count = 0;
@@ -190,7 +190,7 @@ void Sky_LoadTextureQ64 (qmodel_t *mod, texture_t *mt)
 
 	// Normal indexed texture for the back layer
 	q_snprintf(texturename, sizeof(texturename), "%s:%s_back", mod->name, mt->name);
-	solidskytexture = TexMgr_LoadImage (mod, texturename, mt->width, halfheight, SRC_INDEXED, back, "", (src_offset_t)back, TEXPREF_NONE);
+	mt->gltexture = solidskytexture = TexMgr_LoadImage (mod, texturename, mt->width, halfheight, SRC_INDEXED, back, "", (src_offset_t)back, TEXPREF_NONE);
 
 	// front layer, convert to RGBA and upload
 	p = r = g = b = count = 0;
@@ -214,7 +214,7 @@ void Sky_LoadTextureQ64 (qmodel_t *mod, texture_t *mt)
 	}
 
 	q_snprintf(texturename, sizeof(texturename), "%s:%s_front", mod->name, mt->name);
-	alphaskytexture = TexMgr_LoadImage (mod, texturename, mt->width, halfheight, SRC_RGBA, front_rgba, "", (src_offset_t)front_rgba, TEXPREF_ALPHA);
+	mt->fullbright = alphaskytexture = TexMgr_LoadImage (mod, texturename, mt->width, halfheight, SRC_RGBA, front_rgba, "", (src_offset_t)front_rgba, TEXPREF_ALPHA);
 
 	// calculate r_fastsky color based on average of all opaque foreground colors
 	skyflatcolor[0] = (float)r/(count*255);
@@ -736,6 +736,11 @@ void Sky_ProcessEntities (void)
 		if (!e->model || e->model->needload || e->model->type != mod_brush)
 			continue;
 
+		if (e->model->submodelof == cl.worldmodel &&
+			skipsubmodels &&
+			skipsubmodels[e->model->submodelidx>>3]&(1u<<(e->model->submodelidx&7)))
+			return;	//its in the scenecache that we're drawing. don't draw it twice (and certainly not the slow way).
+
 		if (R_CullModelForEntity(e))
 			continue;
 
@@ -1189,7 +1194,18 @@ void Sky_DrawSky (void)
 		glColor3fv (Fog_GetColor());
 	else
 		glColor3fv (skyflatcolor);
-	Sky_ProcessTextureChains ();
+#ifndef SDL_THREADS_DISABLED
+	if (skybox_name[0] && !r_fastsky.value && RSceneCache_DrawSkySurfDepth())
+	{	//we have no surfaces to process... fill all sides. its probably still faster.
+		for (i=0 ; i<6 ; i++)
+		{
+			skymins[0][i] = skymins[1][i] = -FLT_MAX;
+			skymaxs[0][i] = skymaxs[1][i] = FLT_MAX;
+		}
+	}
+	else
+#endif
+		Sky_ProcessTextureChains ();
 	Sky_ProcessEntities ();
 	glColor3f (1, 1, 1);
 	glEnable (GL_TEXTURE_2D);

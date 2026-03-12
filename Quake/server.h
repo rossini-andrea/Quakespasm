@@ -99,6 +99,9 @@ typedef struct
 		eval_t *ptr;
 	} customstats[MAX_CL_STATS*2];	//strings or numeric...
 	size_t numcustomstats;
+
+	qboolean skyroom_pos_known;
+	vec4_t skyroom_pos;
 } server_t;
 
 
@@ -289,6 +292,13 @@ typedef struct client_s
 #define	MSG_EXT_MULTICAST	4	// temporary buffer that can be splurged more reliably / with more control.
 #define	MSG_EXT_ENTITY		5	// for csqc networking. we don't actually support this. I'm just defining it for completeness.
 
+#define PVSF_NORMALPVS		0x0
+#define PVSF_NOTRACECHECK	0x1
+#define PVSF_USEPHS			0x2
+#define PVSF_IGNOREPVS		0x3
+#define PVSF_MODE_MASK		0x3
+#define PVSF_NOREMOVE		0x80
+
 //============================================================================
 
 extern	cvar_t	teamplay;
@@ -348,6 +358,8 @@ void SV_CheckForNewClients (void);
 void SV_RunClients (void);
 void SV_SaveSpawnparms ();
 void SV_SpawnServer (const char *server);
+
+void SV_SetupSkyRoom(char *value);
 
 #endif	/* _QUAKE_SERVER_H */
 

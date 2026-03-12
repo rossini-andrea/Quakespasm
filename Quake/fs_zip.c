@@ -805,7 +805,7 @@ FILE *FSZIP_Deflate(FILE *src, qofs_t srcsize, qofs_t outsize, const char *entry
 			return NULL;
 		}
 	}
-	fwrite(outbuffer, 1, strm.total_out, of);
+	fwrite(outbuffer, 1, strm.next_out - outbuffer, of);
 	inflateEnd(&strm);
 	fclose(src);
 

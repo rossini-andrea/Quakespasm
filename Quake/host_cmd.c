@@ -1035,7 +1035,7 @@ User command to connect to server
 */
 static void Host_Connect_f (void)
 {
-	char	name[MAX_QPATH];
+	char	name[NET_NAMELEN];
 
 	cls.demonum = -1;		// stop demo loop in case this fails
 	if (cls.demoplayback)
@@ -1434,11 +1434,11 @@ static void Host_Loadgame_f (void)
 		{	// parse an edict
 			ent = EDICT_NUM(entnum);
 			if (entnum < qcvm->num_edicts) {
+				SV_UnlinkEdict(ent);
 				ent->free = false;
 				memset (&ent->v, 0, qcvm->progs->entityfields * 4);
 			}
 			else {
-				SV_UnlinkEdict(ent);
 				memset (ent, 0, qcvm->edict_size);
 				ent->baseline = nullentitystate;
 			}

@@ -148,7 +148,8 @@ hull_t *SV_HullForEntity (edict_t *ent, vec3_t mins, vec3_t maxs, vec3_t offset)
 
 		if (!model || model->type != mod_brush)
 		{
-			Con_Warning ("SOLID_BSP with a non bsp model (%s at %f %f %f)\n",
+			Con_Warning ("SOLID_BSP%s with a non bsp model (%s at %f %f %f)\n",
+					(ent->v.solid == SOLID_EXT_BSPTRIGGER)?"TRIGGER":"",
 				    PR_GetString(ent->v.classname), ent->v.origin[0], ent->v.origin[1], ent->v.origin[2]);
 			goto nohitmeshsupport;
 		}
